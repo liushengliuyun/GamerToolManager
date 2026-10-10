@@ -18,10 +18,12 @@
 
 ## 📦 下载
 
-到 [Releases](../../releases) 页面下载：
+到 [Releases](../../releases) 页面下载 **`GamerToolManager-Setup.exe`**（安装版，推荐）：
 
-- `GamerToolManager-Setup.exe` — 安装版（内置 SteamTools 安装包，装完可在程序内一键安装 SteamTools）
-- `GamerToolManager-portable.exe` — 便携版，单文件直接运行
+- 内置 SteamTools 1.8.30 安装包与使用教程，装完可在程序内一键安装 SteamTools
+- 自动创建开始菜单/桌面快捷方式，带卸载器
+
+> 便携版自 v1.2.1 起不再提供：缺少 SteamTools 安装包与教程文件，体验不完整，统一使用安装版。
 
 ## 🧰 使用前置
 
