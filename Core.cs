@@ -46,6 +46,7 @@ public class Settings
     public bool WinMax { get; set; }
     public int SplitTop { get; set; } = 0;  // 列表 | 详情 分割位置
     public int SplitMain { get; set; } = 0; // 主区 | 日志 分割位置
+    public int RegSort { get; set; } = 0;   // 游戏排序: 0=默认 1=注册时间最新在上 2=最旧在上
 
     public string NormalExe => ResolveTool("Manifest2Lua.exe");
     public string NolockExe => ResolveTool("Manifest2Lua-nolock.exe");
@@ -1019,6 +1020,31 @@ public class Store
         string exe = Path.Combine(steamDir, "steam.exe");
         if (File.Exists(exe))
             try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false }); } catch { }
+    }
+
+    /// <summary>
+    /// 清理 Steam 授权查询缓存（appcache/packageinfo、contracts）。
+    /// Steam 会缓存"无授权"的查询结果，导致重启后轮流破解失败；清掉强制下次启动重新查询，SteamTools 必然应答。
+    /// 文件会被 Steam 自动重建，删除安全。
+    /// </summary>
+    public static int CleanSteamLicenseCache(string steamDir)
+    {
+        int removed = 0;
+        try
+        {
+            string ac = Path.Combine(steamDir, "appcache");
+            if (!Directory.Exists(ac)) return 0;
+            foreach (var f in Directory.GetFiles(ac, "*.vdf"))
+            {
+                string n = Path.GetFileName(f).ToLowerInvariant();
+                if (n.StartsWith("packageinfo") || n.StartsWith("contracts"))
+                {
+                    try { File.Delete(f); removed++; } catch { }
+                }
+            }
+        }
+        catch { }
+        return removed;
     }
 
     // ---------- SteamTools 进程 ----------

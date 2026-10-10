@@ -8,7 +8,7 @@ public class MainForm : Form
     private List<GameEntry> entries = new();
     private bool building;
     private bool fetchingNames;
-    private int regSort; // 0=默认(已部署优先) 1=注册时间最新在上 2=最旧在上
+    private int regSort; // 0=默认(已部署优先) 1=注册时间最新在上 2=最旧在上（启动时从设置恢复）
 
     // 控件
     private DataGridView grid = new();
@@ -30,6 +30,7 @@ public class MainForm : Form
     public MainForm()
     {
         store.Load(); // 必须在最前：窗口尺寸恢复依赖已加载的设置
+        regSort = Math.Clamp(store.S.RegSort, 0, 2);
         Text = "GamerTool 管理器 v" + typeof(MainForm).Assembly.GetName().Version.ToString(3);
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1140, 720);
@@ -195,32 +196,31 @@ public class MainForm : Form
         top.Controls.Add(leftFlow);
         top.Controls.Add(title);
 
-        // ---------- 拉取栏（主页面直接拉取，不弹二级窗口） ----------
+        // ---------- 拉取栏（流式布局，输入框固定宽度，任何缩放下按钮都完整可见） ----------
         var pullBar = new Panel { Dock = DockStyle.Top, Height = 64, BackColor = Theme.Panel };
-        var lblPull = new Label { Text = "拉取新游戏:", AutoSize = true, ForeColor = Theme.Sub, Location = new Point(14, 19) };
+        var pullFlow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Padding = new Padding(14, 15, 0, 0),
+        };
+        var lblPull = new Label { Text = "拉取新游戏:", AutoSize = true, ForeColor = Theme.Sub, Margin = new Padding(0, 8, 10, 0) };
         txtPull.Font = new Font("Microsoft YaHei UI", 10.5f);
         txtPull.BackColor = Theme.Input; txtPull.ForeColor = Theme.Text; txtPull.BorderStyle = BorderStyle.FixedSingle;
-        btnPullGo = new Button { Text = "开始拉取", Size = new Size(96, 32) };
+        txtPull.Width = 420; // 固定宽度，不随窗口伸缩
+        txtPull.Margin = new Padding(0, 0, 10, 0);
+        btnPullGo = new Button { Text = "开始拉取", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 32), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 0, 0) };
         UiHelper.Style(btnPullGo, true);
         btnPullGo.Click += async (_, _) => await PullFromMainAsync();
         txtPull.KeyDown += async (_, e) =>
         {
             if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await PullFromMainAsync(); }
         };
-        pullBar.Controls.Add(lblPull);
-        pullBar.Controls.Add(txtPull);
-        pullBar.Controls.Add(btnPullGo);
-        void RelayoutPullBar()
-        {
-            const int btnW = 96, btnH = 32;
-            int rowH = pullBar.Height;
-            lblPull.Location = new Point(14, (rowH - 25) / 2);
-            txtPull.Location = new Point(lblPull.Right + 10, (rowH - 34) / 2);
-            txtPull.Width = Math.Max(120, pullBar.Width - (lblPull.Right + 10) - btnW - 40);
-            btnPullGo.Location = new Point(pullBar.Width - 14 - btnW, (rowH - btnH) / 2);
-        }
-        pullBar.Resize += (_, _) => RelayoutPullBar();
-        RelayoutPullBar();
+        pullFlow.Controls.Add(lblPull);
+        pullFlow.Controls.Add(txtPull);
+        pullFlow.Controls.Add(btnPullGo);
+        pullBar.Controls.Add(pullFlow);
 
         // ---------- 主区 ----------
         scTop = new SplitContainer
@@ -283,6 +283,8 @@ public class MainForm : Form
             if (grid.Columns[e.ColumnIndex].Name == "cReg")
             {
                 regSort = (regSort + 1) % 3; // 默认 → 最新在上 → 最旧在上
+                store.S.RegSort = regSort;
+                store.SaveSettings();
                 RefreshAll();
             }
         };
@@ -1113,6 +1115,10 @@ public class MainForm : Form
             }
 
             // 按正确顺序重启整套：SteamTools 必须先于 Steam 就绪，否则授权查询赶不上就会"破解失效"
+            int cacheCleaned = Store.CleanSteamLicenseCache(store.SteamDirEff);
+            if (cacheCleaned > 0)
+                Log($"✓ 已清理 Steam 授权缓存 {cacheCleaned} 个文件（强制下次启动重新查询授权，杜绝轮流失败）", LogKind.Ok);
+
             if (Store.SteamToolsInstalled)
             {
                 if (Store.SteamToolsRunning)
