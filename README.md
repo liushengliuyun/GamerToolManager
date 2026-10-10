@@ -9,6 +9,8 @@
 | 功能 | 说明 |
 |---|---|
 | 📥 拉取清单 | 输入 AppID / 游戏名 / 粘贴商店链接，自动从多个清单仓库（分支即 AppID 的组织形式）检索并下载清单与 Key.vdf，**多任务并发** |
+| 🛜 清单提取 | 登录自己的 Steam 账号（Steam Guard 支持，本机只存 refresh token 不存密码），从**已拥有**的游戏直接提取 depot 密钥与最新 manifest，生成与拉取同构的 `[AppID]` 目录 |
+| 📤 清单收集 | 扫描收集目录（`[AppID]` 文件夹 / 散装 manifest+Key.vdf），批量上传到社区收集库 [GamerToolManifests](https://github.com/liushengliuyun/GamerToolManifests)（一个 AppID 一个分支），SHA 去重、只增不删、冲突保护；该仓库同时加入拉取镜像末尾，形成 提取→上传→拉取 闭环 |
 | 🚀 部署解锁 | Lua → `stplug-in`、清单 → `depotcache`、addappid 目标登记进 `appids.db`，等价于拖 SteamTools 悬浮窗 |
 | ↩️ 还原未破解 | 精确删除该游戏的 Lua / 清单 / 登记行；支持一键"还原全部" |
 | 🌐 联网补名 | Steam 官方接口抓中文名，直连失败自动走代理 |
@@ -38,18 +40,24 @@
 ② 部署：列表选中游戏 → 点【部署到 Steam 解锁】→ 按提示重启 Steam
 ③ 游玩：Steam 库里出现游戏，正常下载
 ④ 还原：【还原未破解】恢复原状
+⑤ 收集：【清单收集】登录 Steam 提取已拥有游戏 → 上传收集库，让别人也能拉取
 ```
 
 重启 Steam 时程序会按 **Steam 退出 → SteamTools 重启并等就绪 → 再启动 Steam** 的顺序拉起，最大化避免"重启后解锁失效"。
 
 ## 🛠️ 从源码构建
 
-需要 .NET 9 SDK 与 Inno Setup 6/7：
+需要 .NET 9 SDK 与 Inno Setup 6/7。构建时自动 NuGet 还原（SteamKit2）：
 
 ```cmd
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true ^
   -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o publish-sc
 ```
+
+> **上传令牌（维护者）**：公开源码构建不带上传令牌 —— 清单收集的"扫描/提取"可用，"上传"会提示配置。
+> 启用方法：复制 `Secrets.cs.example` 为 `Secrets.cs`（已被 `.gitignore` 排除，绝不提交），
+> 在 [GitHub → Settings → Developer settings → Fine-grained personal access tokens](https://github.com/settings/personal-access-tokens/new)
+> 生成一个**仅授权 GamerToolManifests、Contents 读写**的令牌填入，重新编译。误提交会被 GitHub 秘密扫描自动吊销。
 
 打包安装程序前，把 SteamTools 官方安装包放到 `tools\st-setup-<版本>.exe`（被 `.gitignore` 排除，需自备），然后：
 
@@ -63,7 +71,8 @@ ISCC installer.iss
 |---|---|
 | `%APPDATA%\GamerToolManager\settings.json` | 设置与窗口布局记忆 |
 | `%APPDATA%\GamerToolManager\games.json` | 游戏名/注册时间记录 |
-| `C:\GamerTool\[AppID]` | 拉取产物（清单 + Lua），目录可在设置中更改 |
+| `%APPDATA%\GamerToolManager\steam.refresh` | Steam 登录凭据（账号 + refresh token，密码不留存） |
+| `C:\GamerTool\[AppID]` | 拉取/提取产物（清单 + Key.vdf + Lua），目录可在设置中更改 |
 
 ## ⚠️ 免责声明
 

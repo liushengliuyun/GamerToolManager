@@ -20,7 +20,7 @@ internal static class Program
             string dest = Path.Combine(Path.GetTempPath(), "gtm_pulltest");
             Directory.CreateDirectory(dest);
             Console.WriteLine("== pulltest appid=" + appid + " dest=" + dest);
-            var res = Store.NativePuller.PullAsync(appid, null, dest, store.S.NameProxy,
+            var res = Store.NativePuller.PullAsync(appid, null, dest, store.ProxyEff,
                 (t, _) => Console.WriteLine("  " + t), CancellationToken.None).GetAwaiter().GetResult();
             if (res == null)
             {
@@ -34,6 +34,33 @@ internal static class Program
                 foreach (var line in File.ReadAllLines(res.LuaPath)) Console.WriteLine("  | " + line);
             Console.WriteLine(res.FailedFiles == 0 && res.LuaPath != null ? "PULLTEST OK" : "PULLTEST FAILED");
             return res.FailedFiles == 0 && res.LuaPath != null ? 0 : 1;
+        }
+
+        // 清单收集上传实测：--collecttest <目录>，扫描并把识别出的集合上传到收集仓库
+        if (args.Length > 1 && args[0].Equals("--collecttest", StringComparison.OrdinalIgnoreCase))
+        {
+            var store = new Store();
+            store.Load();
+            string dir = args[1];
+            var sets = Collector.ScanCollectionDir(dir).Where(s => s.Recognized).ToList();
+            Console.WriteLine($"== collecttest dir={dir} sets={sets.Count} token={(Collector.UploadToken == "" ? "(无)" : "(已配置)")}");
+            if (sets.Count == 0) { Console.WriteLine("COLLECTTEST FAILED: no recognized set"); return 1; }
+            try { Collector.EnsureRepoAsync(store.ProxyEff).GetAwaiter().GetResult(); }
+            catch (Exception ex) { Console.WriteLine("COLLECTTEST FAILED: " + ex.Message); return 1; }
+            Console.WriteLine("repo check OK");
+            int ok = 0;
+            foreach (var s in sets)
+            {
+                try
+                {
+                    var r = Collector.UploadSetAsync(store, s, t => Console.WriteLine("  " + t), CancellationToken.None).GetAwaiter().GetResult();
+                    Console.WriteLine(r.Skipped ? $"  [{s.AppId}] 已是最新（跳过）" : $"  [{s.AppId}] 已上传 {r.UploadedFiles} 个文件 commit={r.CommitSha}");
+                    ok++;
+                }
+                catch (Exception ex) { Console.WriteLine($"  [{s.AppId}] FAILED: {ex.Message}"); }
+            }
+            Console.WriteLine(ok == sets.Count ? "COLLECTTEST OK" : "COLLECTTEST FAILED");
+            return ok == sets.Count ? 0 : 1;
         }
 
         // 布局实测模式：打开拉取对话框 0.8 秒，输出所有控件坐标
@@ -83,6 +110,20 @@ internal static class Program
                 m.Close();
             };
             Application.Run(m);
+
+            var cd = new CollectorDialog(store);
+            cd.Shown += async (_, _) =>
+            {
+                await Task.Delay(800);
+                void Dump4(Control c, int depth)
+                {
+                    Console.WriteLine(new string(' ', depth * 2) + c.GetType().Name + "  " + c.Bounds);
+                    foreach (Control k in c.Controls) Dump4(k, depth + 1);
+                }
+                Dump4(cd, 0);
+                cd.Close();
+            };
+            Application.Run(cd);
             return 0;
         }
 
@@ -151,6 +192,33 @@ internal static class SelfTest
             string s = Native.decode_gbk(gbk);
             string codes = string.Join(",", s.Select(c => ((int)c).ToString("X4")));
             check("GBK 解码: " + s + "  (U+" + codes + ")", s == "请输入");
+
+            // 清单收集引擎自检（不依赖网络）
+            byte[] blob = System.Text.Encoding.UTF8.GetBytes("hello gamer tool\n");
+            string sha = Collector.BlobSha(blob);
+            check("BlobSha 向量: " + sha[..12] + "…", sha == "dc5e0f7783288b3ecded5f7f4d2aa364d1b930e2");
+
+            string lua = Store.NativePuller.BuildLuaText(460900,
+                new List<(long depot, string key)> { (460901, new string('a', 64)) },
+                new[] { "460901_2896417252875612038.manifest" });
+            check("BuildLuaText 生成解锁脚本",
+                  lua.StartsWith("addappid(460900)") && lua.Contains("setManifestid(460901,\"2896417252875612038\",0)"));
+
+            string scanRoot = Path.Combine(Path.GetTempPath(), "gtm_scan_" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(Path.Combine(scanRoot, "[460900]SampleGame"));
+            File.WriteAllText(Path.Combine(scanRoot, "[460900]SampleGame", "460900.lua"), "addappid(460900)");
+            Directory.CreateDirectory(Path.Combine(scanRoot, "nolabel"));
+            File.WriteAllText(Path.Combine(scanRoot, "nolabel", "460901.lua"), "lua");
+            Directory.CreateDirectory(Path.Combine(scanRoot, "unknown"));
+            File.WriteAllText(Path.Combine(scanRoot, "unknown", "123_456.manifest"), "bin");
+            var sets = Collector.ScanCollectionDir(scanRoot);
+            check("扫描: 识别 3 个集合（2 可上传 + 1 无法识别）",
+                  sets.Count == 3 &&
+                  sets.Count(x => x.Recognized) == 2 &&
+                  sets.Any(x => x.AppId == 460900 && x.Recognized) &&
+                  sets.Any(x => x.AppId == 460901 && x.Recognized) &&
+                  sets.Any(x => !x.Recognized && x.Note.Contains("无法识别")));
+            try { Directory.Delete(scanRoot, true); } catch { }
 
             // SQLite（在临时副本上测试，不动真实数据库）
             string tmp = Path.Combine(Path.GetTempPath(), "gtm_selftest_" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".db");

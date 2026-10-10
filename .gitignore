@@ -13,3 +13,6 @@ tools/
 # 本机临时
 *.user
 *.suo
+
+# 上传令牌（绝不提交；参考 Secrets.cs.example；误提交会被 GitHub 秘密扫描自动吊销）
+Secrets.cs

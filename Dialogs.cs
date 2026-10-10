@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using SteamKit2.Authentication;
+using static GamerToolManager.Collector;
 
 namespace GamerToolManager;
 
@@ -629,4 +631,613 @@ internal static class UiHelper
         b.ForeColor = primary ? Color.White : Theme.Text;
         b.Cursor = Cursors.Hand;
     }
+}
+
+// ---------------- 清单收集：扫描本地清单集 → 上传收集仓库；登录 Steam → 提取已拥有游戏清单 ----------------
+internal class CollectorDialog : Form
+{
+    private readonly Store store;
+    private readonly SteamExtractor extractor = SteamExtractor.Default;
+
+    private readonly TextBox txtDir = new();
+    private readonly DataGridView grid = new();
+    private readonly RichTextBox log = new();
+    private readonly Label lblTokenHint = new();
+    private readonly Label lblSteam = new();
+    private readonly Button btnScan = new() { Text = "扫描" };
+    private readonly Button btnUpload = new() { Text = "上传选中" };
+    private readonly Button btnStop = new() { Text = "停止", Enabled = false };
+    private readonly Button btnExtract = new() { Text = "从 Steam 提取" };
+    private readonly Button btnOwned = new() { Text = "从已拥有列表选" };
+    private readonly Button btnSteam = new() { Text = "登录 Steam" };
+
+    // Steam 登录小组（未登录时显示）
+    private readonly GroupBox grpLogin = new();
+    private readonly TextBox txtUser = new();
+    private readonly TextBox txtPass = new();
+    private readonly Button btnDoLogin = new() { Text = "登录" };
+
+    private CancellationTokenSource cts;
+    private bool busy;
+
+    /// <summary>提取完成后回调主窗体（刷新列表 + 记日志）。</summary>
+    public Action<long, string> OnExtracted;
+    /// <summary>上传批次结束后回调主窗体（成功数, 失败/冲突数）。</summary>
+    public Action<int, int> OnUploadDone;
+
+    public CollectorDialog(Store store)
+    {
+        this.store = store;
+        Text = "清单收集 — 扫描 / 上传 / Steam 提取";
+        StartPosition = FormStartPosition.CenterParent;
+        ClientSize = new Size(920, 680);
+        MinimumSize = new Size(780, 560);
+        BackColor = Theme.Back;
+        ForeColor = Theme.Text;
+        Font = new Font("Microsoft YaHei UI", 9.5f);
+
+        BuildUi();
+
+        txtDir.Text = store.S.CollectDirEff;
+        UpdateTokenHint();
+        UpdateSteamUi();
+        extractor.StateChanged += OnSteamStateChanged;
+        FormClosing += (_, _) =>
+        {
+            cts?.Cancel();
+            extractor.StateChanged -= OnSteamStateChanged;
+        };
+    }
+
+    void BuildUi()
+    {
+        // ---------- 顶部：目录行 + Steam 行 ----------
+        var top = new Panel { Dock = DockStyle.Top, Height = 104, BackColor = Theme.Panel };
+        var row1 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(10, 8, 0, 0) };
+        var row2 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(10, 4, 0, 0) };
+
+        var lblDir = new Label { Text = "收集目录:", AutoSize = true, ForeColor = Theme.Sub, Margin = new Padding(0, 8, 8, 0) };
+        txtDir.Width = 380;
+        txtDir.BackColor = Theme.Input; txtDir.ForeColor = Theme.Text; txtDir.BorderStyle = BorderStyle.FixedSingle;
+        txtDir.Margin = new Padding(0, 5, 8, 0);
+        var btnBrowse = new Button { Text = "浏览" };
+        UiHelper.Style(btnBrowse);
+        btnBrowse.Margin = new Padding(0, 5, 8, 0);
+        btnBrowse.Click += (_, _) =>
+        {
+            using var d = new FolderBrowserDialog { Description = "选择清单收集目录" };
+            if (Directory.Exists(txtDir.Text)) d.SelectedPath = txtDir.Text;
+            if (d.ShowDialog(this) == DialogResult.OK) { txtDir.Text = d.SelectedPath; PersistDir(); ScanDir(); }
+        };
+        UiHelper.Style(btnScan, true);
+        btnScan.Margin = new Padding(0, 5, 12, 0);
+        btnScan.Click += (_, _) => ScanDir();
+        lblTokenHint.AutoSize = true;
+        lblTokenHint.ForeColor = Theme.Sub;
+        lblTokenHint.Margin = new Padding(0, 10, 0, 0);
+        row1.Controls.AddRange(new Control[] { lblDir, txtDir, btnBrowse, btnScan, lblTokenHint });
+
+        lblSteam.AutoSize = true;
+        lblSteam.ForeColor = Theme.Sub;
+        lblSteam.Margin = new Padding(0, 9, 10, 0);
+        UiHelper.Style(btnSteam);
+        btnSteam.Margin = new Padding(0, 5, 8, 0);
+        btnSteam.Click += (_, _) => ToggleSteamPanel();
+        UiHelper.Style(btnExtract, true);
+        btnExtract.Margin = new Padding(0, 5, 8, 0);
+        btnExtract.Click += async (_, _) => await ExtractAsync();
+        UiHelper.Style(btnOwned);
+        btnOwned.Margin = new Padding(0, 5, 0, 0);
+        btnOwned.Click += async (_, _) => await ChooseOwnedAsync();
+        row2.Controls.AddRange(new Control[] { lblSteam, btnSteam, btnExtract, btnOwned });
+
+        // Steam 登录小组（隐藏在 row2 下方，未登录且点登录时展开）
+        grpLogin.Text = "Steam 登录（凭据只在本机换取 refresh token，密码不留存）";
+        grpLogin.ForeColor = Theme.Sub;
+        grpLogin.BackColor = Theme.Panel;
+        grpLogin.Dock = DockStyle.Top;
+        grpLogin.Height = 92;
+        grpLogin.Visible = false;
+        txtUser.Width = 200;
+        txtUser.PlaceholderText = "账号";
+        StyleBox(txtUser);
+        txtUser.Location = new Point(14, 30);
+        txtPass.Width = 200;
+        txtPass.PlaceholderText = "密码";
+        txtPass.PasswordChar = '●';
+        StyleBox(txtPass);
+        txtPass.Location = new Point(230, 30);
+        UiHelper.Style(btnDoLogin, true);
+        btnDoLogin.Location = new Point(446, 29);
+        btnDoLogin.Click += async (_, _) => await LoginAsync();
+        grpLogin.Controls.Add(txtUser);
+        grpLogin.Controls.Add(txtPass);
+        grpLogin.Controls.Add(btnDoLogin);
+
+        top.Controls.Add(grpLogin);
+        top.Controls.Add(row2);
+        top.Controls.Add(row1);
+        // Dock 自上而下堆叠顺序：后加的在上 —— row1 最上，然后 row2，再 grpLogin
+
+        // ---------- 网格 ----------
+        grid.Dock = DockStyle.Fill;
+        grid.BackgroundColor = Theme.Back;
+        grid.BorderStyle = BorderStyle.None;
+        grid.AllowUserToAddRows = grid.AllowUserToDeleteRows = false;
+        grid.AllowUserToResizeRows = false;
+        grid.MultiSelect = false;
+        grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+        grid.RowHeadersVisible = false;
+        grid.EnableHeadersVisualStyles = false;
+        grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+        grid.GridColor = Theme.Border;
+        grid.RowTemplate.Height = 30;
+        grid.ColumnHeadersHeight = 32;
+        grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+        grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+        grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = Theme.Panel,
+            ForeColor = Theme.Sub,
+            SelectionBackColor = Theme.Panel,
+            SelectionForeColor = Theme.Sub,
+            Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold),
+        };
+        grid.DefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = Theme.Back,
+            ForeColor = Theme.Text,
+            SelectionBackColor = Color.FromArgb(43, 58, 90),
+            SelectionForeColor = Theme.Text,
+        };
+        grid.Columns.Add("cCheck", "");
+        grid.Columns.Add("cId", "AppID");
+        grid.Columns.Add("cName", "名称");
+        grid.Columns.Add("cCount", "清单数");
+        grid.Columns.Add("cVdf", "Key.vdf");
+        grid.Columns.Add("cSize", "大小");
+        grid.Columns.Add("cState", "状态");
+        grid.Columns[0].Width = 40;
+        grid.Columns[0].AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+        grid.Columns[1].FillWeight = 70;
+        grid.Columns[2].FillWeight = 160;
+        grid.Columns[3].FillWeight = 55;
+        grid.Columns[4].FillWeight = 55;
+        grid.Columns[5].FillWeight = 60;
+        grid.Columns[6].FillWeight = 130;
+
+        // ---------- 底部按钮行 + 日志 ----------
+        var btnAll = new Button { Text = "全选/全不选" };
+        UiHelper.Style(btnAll);
+        var btnClose = new Button { Text = "关闭" };
+        UiHelper.Style(btnClose);
+        var bottomFlow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom, Height = 46,
+            FlowDirection = FlowDirection.RightToLeft, BackColor = Theme.Panel,
+            Padding = new Padding(0, 7, 12, 7),
+        };
+        btnUpload.Width = btnScan.Width = btnAll.Width = btnStop.Width = btnClose.Width = 104;
+        btnUpload.Height = btnStop.Height = btnClose.Height = 30;
+        UiHelper.Style(btnUpload, true);
+        UiHelper.Style(btnStop);
+        btnAll.Height = 30;
+        btnUpload.Margin = btnAll.Margin = new Padding(0, 0, 8, 0);
+        btnStop.Margin = btnClose.Margin = new Padding(0, 0, 8, 0);
+        btnUpload.Click += async (_, _) => await UploadSelectedAsync();
+        btnAll.Click += (_, _) => ToggleAll();
+        btnStop.Click += (_, _) => cts?.Cancel();
+        btnClose.Click += (_, _) => Close();
+        bottomFlow.Controls.Add(btnClose);
+        bottomFlow.Controls.Add(btnStop);
+        bottomFlow.Controls.Add(btnAll);
+        bottomFlow.Controls.Add(btnUpload);
+
+        log.Dock = DockStyle.Bottom;
+        log.Height = 150;
+        log.BackColor = Color.FromArgb(18, 20, 26);
+        log.ForeColor = Theme.Text;
+        log.Font = new Font("Microsoft YaHei UI", 9f);
+        log.ReadOnly = true;
+        log.BorderStyle = BorderStyle.None;
+
+        Controls.Add(grid);
+        Controls.Add(log);
+        Controls.Add(bottomFlow);
+        Controls.Add(top);
+    }
+
+    static void StyleBox(TextBox t)
+    {
+        t.BorderStyle = BorderStyle.FixedSingle;
+        t.BackColor = Theme.Input;
+        t.ForeColor = Theme.Text;
+    }
+
+    void UpdateTokenHint()
+    {
+        if (Collector.UploadToken != "")
+        {
+            lblTokenHint.Text = "✓ 上传令牌已内置";
+            lblTokenHint.ForeColor = Theme.Green;
+        }
+        else
+        {
+            lblTokenHint.Text = "⚠ 未内置上传令牌（公开源码构建）：扫描可用，上传需按 Secrets.cs.example 配置后重新编译";
+            lblTokenHint.ForeColor = Theme.Yellow;
+        }
+    }
+
+    void UpdateSteamUi()
+    {
+        bool logged = extractor.IsLoggedOn;
+        lblSteam.Text = logged ? "Steam: 已登录 " + extractor.Account : "Steam: 未登录";
+        lblSteam.ForeColor = logged ? Theme.Green : Theme.Sub;
+        btnSteam.Text = logged ? "切换账号" : "登录 Steam";
+        grpLogin.Visible = !logged && grpLogin.Tag as string == "open";
+        if (string.IsNullOrWhiteSpace(txtUser.Text))
+            txtUser.Text = SteamAuthStore.Load()?.Account ?? "";
+        txtPass.Clear();
+    }
+
+    void ToggleSteamPanel()
+    {
+        if (extractor.IsLoggedOn)
+        {
+            if (MessageBox.Show(this, "退出当前 Steam 登录并清除本机保存的凭据？（refresh token 将被删除）",
+                    "切换账号", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+            extractor.Logout();
+            grpLogin.Tag = "open";
+            UpdateSteamUi();
+            AppendLog("已退出 Steam 登录。", Theme.Yellow);
+            return;
+        }
+        grpLogin.Tag = grpLogin.Visible ? null : "open";
+        UpdateSteamUi();
+    }
+
+    void OnSteamStateChanged()
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        try { BeginInvoke(() => UpdateSteamUi()); } catch { }
+    }
+
+    // ---------- 扫描 ----------
+    void PersistDir()
+    {
+        store.S.CollectDir = txtDir.Text.Trim();
+        store.SaveSettings();
+    }
+
+    void ScanDir()
+    {
+        string dir = txtDir.Text.Trim();
+        if (dir.Length == 0 || !Directory.Exists(dir))
+        {
+            MessageBox.Show(this, "目录不存在:\n" + dir, "清单收集", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        PersistDir();
+        var sets = Collector.ScanCollectionDir(dir);
+        grid.Rows.Clear();
+        foreach (var s in sets)
+        {
+            int i = grid.Rows.Add(
+                s.Recognized,
+                s.Recognized ? s.AppId.ToString() : "—",
+                s.DisplayName,
+                s.Manifests.Count.ToString(),
+                s.VdfLocal != null ? "✓" : "—",
+                s.TotalBytes >= 1024 * 1024 ? (s.TotalBytes / 1024.0 / 1024).ToString("F1") + " MB" : (s.TotalBytes / 1024.0).ToString("F0") + " KB",
+                s.Recognized ? "待上传" : s.Note);
+            grid.Rows[i].Tag = s;
+            if (!s.Recognized)
+            {
+                grid.Rows[i].Cells[0].Value = false;
+                var cell = grid.Rows[i].Cells[0] as DataGridViewCheckBoxCell;
+                cell.Value = false;
+                grid.Rows[i].Cells[0].ReadOnly = true;
+                grid.Rows[i].Cells[6].Style.ForeColor = Theme.Sub;
+            }
+        }
+        int ok = sets.Count(s => s.Recognized);
+        int bad = sets.Count - ok;
+        AppendLog($"扫描完成: 发现 {sets.Count} 个清单集（{ok} 个可上传" + (bad > 0 ? $"，{bad} 个无法识别 AppID" : "") + "）。", Theme.Accent);
+        if (sets.Count == 0)
+            AppendLog("该目录下没有找到清单集。支持 [AppID] 文件夹 / 散装 *.manifest + Key.vdf / 含 <AppID>.lua 的文件夹。", Theme.Sub);
+    }
+
+    void ToggleAll()
+    {
+        bool anyUnchecked = false;
+        foreach (DataGridViewRow r in grid.Rows)
+            if (r.Tag is CollectSet s && s.Recognized && (r.Cells[0] as DataGridViewCheckBoxCell)?.Value is not true)
+                anyUnchecked = true;
+        foreach (DataGridViewRow r in grid.Rows)
+            if (r.Tag is CollectSet s && s.Recognized)
+                r.Cells[0].Value = anyUnchecked;
+    }
+
+    void AppendLog(string line, Color c)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        try
+        {
+            log.SelectionStart = log.TextLength;
+            log.SelectionLength = 0;
+            log.SelectionColor = c;
+            log.AppendText(line + "\n");
+            log.SelectionStart = log.TextLength;
+            log.ScrollToCaret();
+        }
+        catch { }
+    }
+
+    Action<string, LogKind> ExtractLog() => (t, k) =>
+    {
+        var c = k switch
+        {
+            LogKind.Ok => Theme.Green,
+            LogKind.Warn => Theme.Yellow,
+            LogKind.Err => Theme.Red,
+            LogKind.Tool => Theme.ToolC,
+            _ => Theme.Text,
+        };
+        try { BeginInvoke(() => AppendLog("  " + t, c)); } catch { }
+    };
+
+    void SetBusy(bool on)
+    {
+        busy = on;
+        btnScan.Enabled = btnUpload.Enabled = btnExtract.Enabled = btnOwned.Enabled =
+        btnSteam.Enabled = btnDoLogin.Enabled = txtUser.Enabled = txtPass.Enabled = txtDir.Enabled = !on;
+        btnStop.Enabled = on;
+    }
+
+    void SetRowState(DataGridViewRow row, string state, Color color)
+    {
+        row.Cells[6].Value = state;
+        row.Cells[6].Style.ForeColor = color;
+    }
+
+    // ---------- 上传 ----------
+    async Task UploadSelectedAsync()
+    {
+        if (busy) return;
+        var targets = grid.Rows.Cast<DataGridViewRow>()
+            .Where(r => r.Tag is CollectSet s && s.Recognized && (r.Cells[0] as DataGridViewCheckBoxCell)?.Value is true)
+            .ToList();
+        if (targets.Count == 0)
+        {
+            MessageBox.Show(this, "请先扫描并勾选要上传的清单集。", "清单收集", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (Collector.UploadToken == "")
+        {
+            MessageBox.Show(this,
+                "当前构建没有内置上传令牌。\n\n维护者按 Secrets.cs.example 配好令牌重新编译后，上传即可用（普通用户无感）。",
+                "上传", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (MessageBox.Show(this,
+                $"将把 {targets.Count} 个清单集上传到 {Collector.RepoSlug}。\n已有分支只提交差异，不删除远端文件。\n\n继续？",
+                "上传清单", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+
+        SetBusy(true);
+        cts = new CancellationTokenSource();
+        int ok = 0, conflict = 0, fail = 0;
+        try
+        {
+            AppendLog($"== 开始上传 {targets.Count} 个清单集 → {Collector.RepoSlug}", Theme.Accent);
+            try
+            {
+                await Collector.EnsureRepoAsync(store.ProxyEff);
+                AppendLog("✓ 令牌与仓库校验通过。", Theme.Green);
+            }
+            catch (Exception ex)
+            {
+                AppendLog("✕ " + ex.Message, Theme.Red);
+                return; // abort batch
+            }
+
+            foreach (var row in targets)
+            {
+                var s = (CollectSet)row.Tag;
+                cts.Token.ThrowIfCancellationRequested();
+                SetRowState(row, "上传中…", Theme.Yellow);
+                try
+                {
+                    var r = await Collector.UploadSetAsync(store, s, t => AppendLog("  " + t, Theme.ToolC), cts.Token);
+                    if (r.Skipped) { SetRowState(row, "已是最新（跳过）", Theme.Sub); }
+                    else
+                    {
+                        SetRowState(row, $"已上传 ✓（{r.CommitSha}）", Theme.Green);
+                        ok++;
+                    }
+                }
+                catch (Collector.ApiException aex) when (aex.Status == 401 || aex.Status == 403)
+                {
+                    SetRowState(row, "失败: " + aex.Message, Theme.Red);
+                    AppendLog("✕ " + aex.Message + " 中止整批上传。", Theme.Red);
+                    break;
+                }
+                catch (Collector.ApiException aex) when (aex.Status == 422)
+                {
+                    SetRowState(row, "冲突（远端已被他人更新）", Theme.Yellow);
+                    conflict++;
+                    AppendLog($"  ⚠ {s.AppId}: 分支在期间被他人更新，跳过（重新扫描后可再传）。", Theme.Yellow);
+                }
+                catch (Exception ex)
+                {
+                    fail++;
+                    SetRowState(row, "失败: " + ex.Message, Theme.Red);
+                    AppendLog($"  ✕ {s.AppId}: {ex.Message}", Theme.Red);
+                }
+            }
+            AppendLog($"== 上传结束: 成功 {ok}，冲突 {conflict}，失败 {fail}。", ok + conflict + fail > 0 ? Theme.Accent : Theme.Sub);
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("已手动取消。", Theme.Yellow);
+        }
+        finally
+        {
+            SetBusy(false);
+            OnUploadDone?.Invoke(ok, conflict + fail);
+        }
+    }
+
+    // ---------- Steam 登录 ----------
+    async Task LoginAsync()
+    {
+        if (busy) return;
+        string user = txtUser.Text.Trim(), pass = txtPass.Text;
+        if (user.Length == 0 || pass.Length == 0)
+        {
+            MessageBox.Show(this, "请输入账号与密码。", "Steam 登录", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        SetBusy(true);
+        cts = new CancellationTokenSource();
+        try
+        {
+            await extractor.InteractiveLogOnAsync(user, pass, new UiAuthenticator(this), cts.Token, ExtractLog());
+            AppendLog("✓ Steam 登录完成。", Theme.Green);
+        }
+        catch (OperationCanceledException) { AppendLog("已取消登录。", Theme.Yellow); }
+        catch (NeedsLoginException) { /* 凭据失效已清除，面板保持展开 */ }
+        catch (Exception ex) { AppendLog("✕ 登录失败: " + ex.Message, Theme.Red); }
+        finally { SetBusy(false); txtPass.Clear(); }
+    }
+
+    // ---------- 提取 ----------
+    async Task ExtractAsync()
+    {
+        if (busy) return;
+        string input = InputDialog.Show(this, "从 Steam 提取清单",
+            "输入 AppID / 游戏名 / Steam 商店链接（仅限当前账号已拥有的游戏）:", "");
+        if (string.IsNullOrWhiteSpace(input)) return;
+
+        long appid;
+        var linkId = Store.ExtractAppId(input);
+        if (linkId != null) appid = linkId.Value;
+        else if (long.TryParse(input.Trim(), out var n) && input.Trim().Length >= 4) appid = n;
+        else
+        {
+            // 游戏名搜索（与主窗体拉取一致的 UX）
+            AppendLog("搜索 Steam 商店: " + input, Theme.ToolC);
+            List<(long id, string name)> matches;
+            try { matches = await Store.NativePuller.SearchGamesAsync(input, store.ProxyEff); }
+            catch (Exception ex) { AppendLog("✕ 搜索失败: " + ex.Message, Theme.Red); return; }
+            if (matches.Count == 0) { AppendLog("✕ 未搜索到匹配的游戏（可尝试英文名或直接输 AppID）。", Theme.Yellow); return; }
+            if (matches.Count == 1) { appid = matches[0].id; }
+            else
+            {
+                using var chooser = new GameChooser(matches.Take(15).ToList());
+                if (chooser.ShowDialog(this) != DialogResult.OK) return;
+                appid = chooser.PickId;
+            }
+        }
+
+        await RunExtractAsync(appid);
+    }
+
+    /// <summary>提取的共用执行段（输入解析后与已拥有列表选中后共用）。</summary>
+    async Task RunExtractAsync(long appid)
+    {
+        cts = new CancellationTokenSource();
+        SetBusy(true);
+        try
+        {
+            AppendLog($"== 从 Steam 提取 {appid} …", Theme.Accent);
+            var r = await extractor.ExtractAsync(appid, store.S.GamerToolDir, cts.Token, ExtractLog());
+            AfterExtract(r);
+        }
+        catch (NeedsLoginException)
+        {
+            grpLogin.Tag = "open";
+            UpdateSteamUi();
+            AppendLog("⚠ 需要先登录 Steam（在上方输入账号密码）。", Theme.Yellow);
+        }
+        catch (OperationCanceledException) { AppendLog("已手动取消提取。", Theme.Yellow); }
+        catch (Exception ex) { AppendLog("✕ 提取失败: " + ex.Message, Theme.Red); }
+        finally { SetBusy(false); }
+    }
+
+    void AfterExtract(SteamExtractor.ExtractResult r)
+    {
+        AppendLog($"✓ 提取完成: {r.Dir}", Theme.Green);
+        // 提取产物在 GamerTool 目录；收集目录相同则自动重扫，否则提示
+        if (string.Equals(store.S.CollectDirEff, store.S.GamerToolDir, StringComparison.OrdinalIgnoreCase))
+        {
+            txtDir.Text = store.S.CollectDirEff;
+            ScanDir();
+        }
+        else
+        {
+            AppendLog("提示: 提取产物在 GamerTool 目录，把收集目录切到那里扫描即可上传。", Theme.Sub);
+        }
+        OnExtracted?.Invoke(r.AppId, r.Dir);
+    }
+
+    // ---------- 已拥有列表 ----------
+    async Task ChooseOwnedAsync()
+    {
+        if (busy) return;
+        SetBusy(true);
+        try
+        {
+            var owned = await extractor.GetOwnedAppsAsync(CancellationToken.None, ExtractLog());
+            var games = owned.OrderBy(id => id)
+                .Take(500)
+                .Select(id => ((long)id, store.Records.TryGetValue(id, out var r) ? (r.Name ?? r.FetchedName) ?? "(未登记名)" : "(未登记名)"))
+                .ToList();
+            if (games.Count == 0) { AppendLog("已拥有列表为空。", Theme.Yellow); return; }
+            using var chooser = new GameChooser(games);
+            if (chooser.ShowDialog(this) == DialogResult.OK)
+                await RunExtractAsync(chooser.PickId);
+        }
+        catch (NeedsLoginException)
+        {
+            grpLogin.Tag = "open";
+            UpdateSteamUi();
+            AppendLog("⚠ 需要先登录 Steam（在上方输入账号密码）。", Theme.Yellow);
+        }
+        catch (Exception ex) { AppendLog("✕ 获取已拥有列表失败: " + ex.Message, Theme.Red); }
+        finally { SetBusy(false); }
+    }
+
+}
+
+// ---------------- Steam Guard UI 适配器：SteamKit 在任意线程回调，这里转到 UI 线程弹窗 ----------------
+internal class UiAuthenticator : IAuthenticator
+{
+    private readonly Form owner;
+    public UiAuthenticator(Form owner) { this.owner = owner; }
+
+    Task<T> OnUi<T>(Func<T> f)
+    {
+        var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        owner.BeginInvoke(() =>
+        {
+            try { tcs.SetResult(f()); }
+            catch (Exception ex) { tcs.SetException(ex); }
+        });
+        return tcs.Task;
+    }
+
+    public Task<string> GetDeviceCodeAsync(bool previousCodeWasIncorrect) =>
+        OnUi(() => InputDialog.Show(owner, "Steam 令牌",
+            "输入手机 Steam 令牌的动态验证码" + (previousCodeWasIncorrect ? "（上次验证码错误，请重输）" : "") + ":", ""));
+
+    public Task<string> GetEmailCodeAsync(string email, bool previousCodeWasIncorrect) =>
+        OnUi(() => InputDialog.Show(owner, "Steam Guard",
+            $"输入发送到 {email} 的邮件验证码" + (previousCodeWasIncorrect ? "（上次验证码错误，请重输）" : "") + ":", ""));
+
+    public Task<bool> AcceptDeviceConfirmationAsync() =>
+        OnUi(() => MessageBox.Show(owner,
+            "请在手机 Steam 上确认本次登录，完成后点“确定”。",
+            "手机确认", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) == DialogResult.OK);
 }

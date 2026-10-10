@@ -39,6 +39,7 @@ public class Settings
     public bool CleanAppIdsDb { get; set; } = true;     // 还原时同时清理 SteamTools appids.db 登记
     public bool PassProxyToTool { get; set; } = false;  // (保留兼容)
     public bool AutoFetchNames { get; set; } = true;    // 启动时后台抓取缺失游戏名
+    public string CollectDir { get; set; } = "";        // 清单收集目录；留空 = GamerToolDir
 
     // ----- 窗口布局记忆 -----
     public int WinW { get; set; } = 0;      // 0 = 未记忆，用默认
@@ -51,6 +52,8 @@ public class Settings
     public string NormalExe => ResolveTool("Manifest2Lua.exe");
     public string NolockExe => ResolveTool("Manifest2Lua-nolock.exe");
     public string SelectedExe => M2LVariant == "nolock" ? NolockExe : NormalExe;
+    /// <summary>清单收集扫描/上传使用的目录（未单独设置时用 GamerTool 目录）。</summary>
+    public string CollectDirEff => string.IsNullOrWhiteSpace(CollectDir) ? GamerToolDir : CollectDir;
 
     /// <summary>工具解析：优先 exe 旁边（安装包自带），其次 GamerTool 目录，最后返回 exe 旁路径（用于报错提示）。</summary>
     private string ResolveTool(string name)
@@ -60,6 +63,84 @@ public class Settings
         string inRoot = Path.Combine(GamerToolDir, name);
         if (File.Exists(inRoot)) return inRoot;
         return besideApp;
+    }
+}
+
+// ---------------- 代理探活与端口漂移自愈 ----------------
+public partial class Store
+{
+    private readonly object proxyGate = new();
+    private string validatedProxy;
+    private DateTime validatedAt = DateTime.MinValue;
+
+    /// <summary>代理状态变化通知（UI 订阅后写日志）。</summary>
+    public static event Action<string> ProxyNotice;
+
+    /// <summary>
+    /// 实际可用的代理（5 分钟缓存）：配置代理探活失败则自动探测常见本地端口
+    /// （FlClash/Clash 端口漂移），找到即切换并写回设置；全不可用则返回空串跳过代理直连，
+    /// 不再出现“目标计算机积极拒绝”这类误导性报错。
+    /// </summary>
+    public string ProxyEff
+    {
+        get
+        {
+            string cfg = S.NameProxy?.Trim() ?? "";
+            if (cfg.Length == 0) return "";
+            lock (proxyGate)
+            {
+                if (validatedProxy != null && (DateTime.Now - validatedAt).TotalMinutes < 5)
+                    return validatedProxy;
+
+                string found = ProbeProxy(cfg);
+                if (found != cfg)
+                {
+                    ProxyNotice?.Invoke(found == ""
+                        ? $"⚠ 代理 {cfg} 无响应，常见端口也没有活代理 —— 本次跳过代理直连（可在设置里修改）。"
+                        : $"✓ 代理端口漂移: {cfg} → {found}，已自动切换并保存。");
+                    validatedProxy = found;
+                    if (found != "")
+                    {
+                        S.NameProxy = found;
+                        SaveSettings();
+                    }
+                }
+                else
+                {
+                    validatedProxy = cfg;
+                }
+                validatedAt = DateTime.Now;
+                return validatedProxy;
+            }
+        }
+    }
+
+    /// <summary>先探配置端口，失败再扫常见本地代理端口；都没有返回空串。</summary>
+    private static string ProbeProxy(string configured)
+    {
+        if (ProbeTcp(configured)) return configured;
+        string host = "127.0.0.1";
+        int[] ports = { 7890, 7891, 7892, 7893, 7897, 7899, 2080, 10808, 10809, 1080, 8080, 8888 };
+        foreach (int p in ports)
+        {
+            var cand = $"http://{host}:{p}";
+            if (cand.Equals(configured, StringComparison.OrdinalIgnoreCase)) continue;
+            if (ProbeTcp(cand)) return cand;
+        }
+        return "";
+    }
+
+    private static bool ProbeTcp(string proxyUrl)
+    {
+        try
+        {
+            var uri = new Uri(proxyUrl);
+            using var c = new System.Net.Sockets.TcpClient();
+            var connect = c.ConnectAsync(uri.Host, uri.Port);
+            if (!connect.Wait(400)) return false;
+            return c.Connected;
+        }
+        catch { return false; }
     }
 }
 
@@ -297,7 +378,7 @@ internal static class MiniSql
 }
 
 // ---------------- 数据与操作中枢 ----------------
-public class Store
+public partial class Store
 {
     public Settings S = new();
     public Dictionary<long, GameRecord> Records = new();
@@ -644,6 +725,7 @@ public class Store
             "tymolu233/ManifestAutoUpdate",
             "SteamAutoCracks/ManifestHub",
             "ikun0014/ManifestHub",
+            "liushengliuyun/GamerToolManifests", // 本工具社区收集库（上传↔拉取闭环），放最后兜底
         };
         static readonly string[] Mirrors =
         {
@@ -655,6 +737,7 @@ public class Store
 
         static readonly HttpClient Http = CreateClient(null);
         static HttpClient httpProxy;
+        static string httpProxyKey;
 
         static HttpClient CreateClient(string proxy)
         {
@@ -670,7 +753,16 @@ public class Store
             return c;
         }
 
-        static HttpClient Px(string proxy) => httpProxy ??= CreateClient(proxy);
+        static HttpClient Px(string proxy)
+        {
+            // 代理地址可能经 ProxyEff 漂移切换，按地址缓存而不是只缓存首个
+            if (httpProxy == null || httpProxyKey != proxy)
+            {
+                httpProxy = CreateClient(proxy);
+                httpProxyKey = proxy;
+            }
+            return httpProxy;
+        }
 
         /// <summary>直连优先，失败走代理。</summary>
         static async Task<string> GetStringSmart(string url, string proxy)
@@ -738,6 +830,23 @@ public class Store
             foreach (Match m in rx.Matches(vdfText))
                 list.Add((long.Parse(m.Groups[1].Value), m.Groups[2].Value));
             return list;
+        }
+
+        /// <summary>生成解锁 Lua：addappid(appid) + addappid(depot,1,"key")… + setManifestid(depot,"mid",0)…（拉取与收集上传共用）。</summary>
+        internal static string BuildLuaText(long appid, IEnumerable<(long depot, string key)> depots, IEnumerable<string> manifestFileNames)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"addappid({appid})");
+            foreach (var (depot, key) in depots)
+                sb.AppendLine($"addappid({depot},1,\"{key}\")");
+            var rxMan = new Regex(@"^(\d+)_(\d+)\.manifest$", RegexOptions.IgnoreCase);
+            foreach (var mp in manifestFileNames)
+            {
+                var m = rxMan.Match(Path.GetFileName(mp));
+                if (m.Success)
+                    sb.AppendLine($"setManifestid({m.Groups[1].Value},\"{m.Groups[2].Value}\",0)");
+            }
+            return sb.ToString();
         }
 
         public static async Task<Result> PullAsync(long appid, string gameName, string rootDir, string proxy,
@@ -867,19 +976,8 @@ public class Store
                 result.Depots = depots.Select(d => d.depot).ToList();
 
                 // 生成解锁 Lua
-                var sb = new System.Text.StringBuilder();
-                sb.AppendLine($"addappid({appid})");
-                foreach (var (depot, key) in depots)
-                    sb.AppendLine($"addappid({depot},1,\"{key}\")");
-                var rxMan = new Regex(@"^(\d+)_(\d+)\.manifest$", RegexOptions.IgnoreCase);
-                foreach (var mp in manifests)
-                {
-                    var m = rxMan.Match(Path.GetFileName(mp));
-                    if (m.Success)
-                        sb.AppendLine($"setManifestid({m.Groups[1].Value},\"{m.Groups[2].Value}\",0)");
-                }
                 string luaPath = Path.Combine(dir, appid + ".lua");
-                await File.WriteAllTextAsync(luaPath, sb.ToString(), ct);
+                await File.WriteAllTextAsync(luaPath, BuildLuaText(appid, depots, manifests), ct);
                 result.LuaPath = luaPath;
                 result.Files++;
                 return result;
@@ -1070,16 +1168,21 @@ public class Store
     { AutomaticDecompression = DecompressionMethods.All }) { Timeout = TimeSpan.FromSeconds(6) };
 
     private static HttpClient hcProxy;
+    private static string hcProxyKey;
 
     private static HttpClient ProxyClient(string proxy)
     {
-        if (hcProxy == null)
+        // 地址可能经 ProxyEff 漂移切换，按地址缓存
+        if (hcProxy == null || hcProxyKey != proxy)
+        {
             hcProxy = new HttpClient(new HttpClientHandler
             {
                 Proxy = new WebProxy(proxy),
                 UseProxy = true,
                 AutomaticDecompression = DecompressionMethods.All,
             }) { Timeout = TimeSpan.FromSeconds(8) };
+            hcProxyKey = proxy;
+        }
         return hcProxy;
     }
 

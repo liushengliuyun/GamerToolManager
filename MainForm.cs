@@ -48,6 +48,10 @@ public class MainForm : Form
         BuildUi();
         RefreshAll();
 
+        // 代理探活/漂移自愈通知写进运行日志
+        Store.ProxyNotice += msg => Log(msg,
+            msg.StartsWith("⚠") ? LogKind.Warn : msg.StartsWith("✓") ? LogKind.Ok : LogKind.Info);
+
         Load += (_, _) =>
         {
             // 控件有实际尺寸后再设分割位置：先恢复最大化，再按当前宽度收敛记忆值
@@ -87,6 +91,7 @@ public class MainForm : Form
         // 关闭时记忆布局：窗口宽高、最大化的判定、两个分割位置
         FormClosing += (_, e) =>
         {
+            SteamExtractor.Default.Disconnect();
             try
             {
                 if (WindowState == FormWindowState.Normal)
@@ -153,7 +158,8 @@ public class MainForm : Form
         ToolBtn("重启 Steam", async (_, _) => await PromptSteamRestartAsync("手动重启 Steam。"));
         ToolBtn("刷新", (_, _) => RefreshAll());
         ToolBtn("SteamTools", (_, _) => SteamToolsButton());
-        ToolBtn("使用教程", (_, _) => ShowTutorial());
+                ToolBtn("使用教程", (_, _) => ShowTutorial());
+        ToolBtn("清单收集", (_, _) => ShowCollector());
         ToolBtn("设置", (_, _) => ShowSettings());
 
         var moreBtn = new Button
@@ -728,18 +734,18 @@ public class MainForm : Form
         {
             appid = linkId.Value;
             Log("链接解析 AppID: " + appid, LogKind.Info);
-            try { name = await Store.FetchGameNameAsync(appid, store.S.NameProxy); } catch { }
+            try { name = await Store.FetchGameNameAsync(appid, store.ProxyEff); } catch { }
         }
         else if (long.TryParse(input, out appid) && input.Length >= 4)
         {
             Log("输入 AppID: " + appid, LogKind.Info);
-            try { name = await Store.FetchGameNameAsync(appid, store.S.NameProxy); } catch { }
+            try { name = await Store.FetchGameNameAsync(appid, store.ProxyEff); } catch { }
         }
         else
         {
             Log("搜索 Steam 商店: " + input, LogKind.Info);
             List<(long id, string name)> matches;
-            try { matches = await Store.NativePuller.SearchGamesAsync(input, store.S.NameProxy); }
+            try { matches = await Store.NativePuller.SearchGamesAsync(input, store.ProxyEff); }
             catch (Exception ex) { Log("✕ 搜索失败: " + ex.Message, LogKind.Err); return; }
             if (matches.Count == 0)
             {
@@ -788,7 +794,7 @@ public class MainForm : Form
             Store.NativePuller.Result res;
             try
             {
-                res = await Store.NativePuller.PullAsync(appid, name, store.S.GamerToolDir, store.S.NameProxy,
+                res = await Store.NativePuller.PullAsync(appid, name, store.S.GamerToolDir, store.ProxyEff,
                     (t, k) => Log(t, k), CancellationToken.None);
             }
             catch (Exception ex)
@@ -826,7 +832,7 @@ public class MainForm : Form
         try
         {
             Log($"重新拉取 {e.DisplayName}（{e.AppId}）的最新清单，覆盖旧文件…", LogKind.Info);
-            var res = await Store.NativePuller.PullAsync(e.AppId, null, store.S.GamerToolDir, store.S.NameProxy,
+            var res = await Store.NativePuller.PullAsync(e.AppId, null, store.S.GamerToolDir, store.ProxyEff,
                 (t, k) => Log(t, k), CancellationToken.None, existingDir: e.Folder, force: true);
             if (res == null)
                 Log("✕ 所有仓库都没有该游戏的分支。", LogKind.Err);
@@ -996,7 +1002,7 @@ public class MainForm : Form
         try
         {
             Log("联网抓取 " + e.AppId + " 的游戏名…", LogKind.Info);
-            string name = await Store.FetchGameNameAsync(e.AppId, store.S.NameProxy);
+            string name = await Store.FetchGameNameAsync(e.AppId, store.ProxyEff);
             if (name == null)
             {
                 Log("✕ 未获取到 " + e.AppId + " 的游戏名（可检查设置里的代理）", LogKind.Warn);
@@ -1038,7 +1044,7 @@ public class MainForm : Form
         foreach (var e in missing)
         {
             string name = null;
-            try { name = await Store.FetchGameNameAsync(e.AppId, store.S.NameProxy); } catch { }
+            try { name = await Store.FetchGameNameAsync(e.AppId, store.ProxyEff); } catch { }
             if (name != null)
             {
                 ok++;
@@ -1071,6 +1077,22 @@ public class MainForm : Form
         using var d = new OrphanDialog(store, ids);
         d.ShowDialog(this);
         RefreshAll();
+    }
+
+    private void ShowCollector()
+    {
+        using var d = new CollectorDialog(store)
+        {
+            OnExtracted = (appid, dir) =>
+            {
+                Log($"✓ 清单提取完成: {dir} —— 可部署，也可在【清单收集】里上传。", LogKind.Ok);
+                RefreshAll();
+            },
+            OnUploadDone = (ok, fail) =>
+                Log($"清单收集上传结束: 成功 {ok}，失败/冲突 {fail}。" +
+                    (ok > 0 ? $"分支见 github.com/{Collector.Owner}/{Collector.Repo}" : ""), ok > 0 ? LogKind.Ok : LogKind.Warn),
+        };
+        d.ShowDialog(this);
     }
 
     private void ShowSettings()
