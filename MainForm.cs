@@ -210,6 +210,7 @@ public class MainForm : Form
         txtPull.BackColor = Theme.Input; txtPull.ForeColor = Theme.Text; txtPull.BorderStyle = BorderStyle.FixedSingle;
         txtPull.Width = 420; // 固定宽度，不随窗口伸缩
         txtPull.Margin = new Padding(0, 0, 10, 0);
+        txtPull.PlaceholderText = "AppID / 游戏名 / 粘贴或拖入 Steam 链接";
         btnPullGo = new Button { Text = "开始拉取", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 32), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 0, 0) };
         UiHelper.Style(btnPullGo, true);
         btnPullGo.Click += async (_, _) => await PullFromMainAsync();
@@ -460,6 +461,7 @@ public class MainForm : Form
         };
 
         Log("就绪。GamerTool: " + store.S.GamerToolDir + " | Steam: " + (store.SteamDirEff == "" ? "未检测到" : store.SteamDirEff), LogKind.Info);
+        Log("提示: 把 Steam 商店链接拖进窗口（或复制粘贴到上方输入框）即可直接搜索拉取。", LogKind.Warn);
         if (store.SteamDirEff == "")
             Log("⚠ 未检测到 Steam 目录，部署/还原不可用 —— 请到【设置】手动指定。", LogKind.Warn);
     }
