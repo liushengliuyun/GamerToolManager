@@ -1,0 +1,15 @@
+# 构建产物
+bin/
+obj/
+publish/
+publish-sc/
+
+# 安装包构建输出（Release 资产另行上传）
+installer/
+
+# 第三方/大体积二进制（构建安装包前自行放入 tools/）
+tools/
+
+# 本机临时
+*.user
+*.suo
