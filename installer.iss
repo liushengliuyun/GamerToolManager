@@ -1,8 +1,14 @@
 ﻿; GamerTool 管理器 安装脚本 (Inno Setup 7)
+; 版本号自动读取 publish-sc\GamerToolManager.exe 的文件版本，永不脱节
+#define AppVersion GetVersionNumbersString("publish-sc\GamerToolManager.exe")
+
 [Setup]
 AppId={{0A1D0D2F-86BA-4D45-A5F8-D8B24F4B419A}
 AppName=GamerTool 管理器
-AppVersion=1.0.0
+AppVersion={#AppVersion}
+AppVerName=GamerTool 管理器 {#AppVersion}
+VersionInfoVersion={#AppVersion}
+VersionInfoTextVersion={#AppVersion}
 AppPublisher=GamerTool
 DefaultDirName={autopf}\GamerToolManager
 DefaultGroupName=GamerTool 管理器
