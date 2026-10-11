@@ -986,6 +986,20 @@ internal class CollectorDialog : Form
         grid.Columns[5].FillWeight = 50;
         grid.Columns[6].FillWeight = 55;
         grid.Columns[7].FillWeight = 120;
+        // 勾选标记用绿色平铺样式，深底上醒目
+        if (grid.Columns[0] is DataGridViewCheckBoxColumn chk)
+        {
+            chk.FlatStyle = FlatStyle.Flat;
+            chk.DefaultCellStyle.ForeColor = Theme.Green;
+            chk.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+        }
+        // 勾中的行整行加蓝色底色，选中状态一目了然
+        grid.CellValueChanged += (_, e) =>
+        {
+            if (e.ColumnIndex != 0 || e.RowIndex < 0) return;
+            var row = grid.Rows[e.RowIndex];
+            row.DefaultCellStyle.BackColor = row.Cells[0].Value is true ? Color.FromArgb(32, 48, 76) : Theme.Back;
+        };
 
         // ---------- 底部按钮行 + 日志（AutoSize，任何 DPI 不裁字） ----------
         var btnAll = new Button { Text = "全选/全不选" };
