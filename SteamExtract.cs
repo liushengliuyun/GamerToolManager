@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using SteamKit2;
 using SteamKit2.Authentication;
 
@@ -42,6 +43,37 @@ internal static class SteamAuthStore
     public static void Delete()
     {
         try { if (File.Exists(Path)) File.Delete(Path); } catch { }
+    }
+
+    /// <summary>
+    /// 从 Steam 客户端的 loginusers.vdf 读取最近登录的账号名，用于登录预填。
+    /// 该文件是明文且只含账号名（不含任何凭据）；凭据部分客户端是加密存储的，我们不读取。
+    /// 优先级：AutoLogin=1（客户端当前自动登录账号）→ MostRecent=1（旧字段）→ Timestamp 最新。
+    /// </summary>
+    public static string DetectLastSteamAccount(string steamDir)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(steamDir)) return null;
+            string path = System.IO.Path.Combine(steamDir, "config", "loginusers.vdf");
+            if (!File.Exists(path)) return null;
+            string text = File.ReadAllText(path);
+            string best = null;
+            long bestTs = -1;
+            foreach (Match b in Regex.Matches(text, "\"7656\\d+\"\\s*\\{([^}]*)\\}"))
+            {
+                string body = b.Groups[1].Value;
+                string name = Regex.Match(body, "\"AccountName\"\\s*\"([^\"]*)\"").Groups[1].Value;
+                if (string.IsNullOrEmpty(name)) continue;
+                if (Regex.IsMatch(body, "\"AutoLogin\"\\s*\"1\"") ||
+                    Regex.IsMatch(body, "\"MostRecent\"\\s*\"1\""))
+                    return name;
+                long.TryParse(Regex.Match(body, "\"Timestamp\"\\s*\"(\\d+)\"").Groups[1].Value, out long ts);
+                if (best == null || ts > bestTs) { best = name; bestTs = ts; }
+            }
+            return best;
+        }
+        catch { return null; }
     }
 }
 

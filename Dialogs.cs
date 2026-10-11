@@ -916,7 +916,9 @@ internal class CollectorDialog : Form
         btnSteam.Text = logged ? "切换账号" : "登录 Steam";
         rowLogin.Visible = !logged && rowLogin.Tag as string == "open";
         if (string.IsNullOrWhiteSpace(txtUser.Text))
-            txtUser.Text = SteamAuthStore.Load()?.Account ?? "";
+            txtUser.Text = SteamAuthStore.Load()?.Account
+                           ?? SteamAuthStore.DetectLastSteamAccount(store.SteamDirEff)
+                           ?? "";
         txtPass.Clear();
     }
 
