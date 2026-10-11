@@ -258,7 +258,7 @@ public class MainForm : Form
             AllowUserToDeleteRows = false,
             AllowUserToResizeRows = false,
             ReadOnly = true,
-            MultiSelect = false,
+            MultiSelect = true,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             RowHeadersVisible = false,
             EnableHeadersVisualStyles = false,
@@ -495,6 +495,13 @@ public class MainForm : Form
         if (i >= 0 && i < grid.Rows.Count && grid.Rows[i].Tag is GameEntry e2) return e2;
         return null;
     }
+
+    /// <summary>当前多选的全部游戏（Ctrl/Shift 点选；单选时即一个）。</summary>
+    private List<GameEntry> SelectedMany() =>
+        grid.SelectedRows.Cast<DataGridViewRow>()
+            .Where(r => r.Tag is GameEntry)
+            .Select(r => (GameEntry)r.Tag)
+            .ToList();
 
     private void RefreshAll(bool keepSelection = true)
     {
@@ -871,33 +878,125 @@ public class MainForm : Form
 
     private async Task DeploySelectedAsync()
     {
-        var e = Selected();
-        if (e == null) return;
+        var targets = SelectedMany().Where(e => e.SourceLuaExists).ToList();
+        if (targets.Count == 0)
+        {
+            MessageBox.Show(this, "选中的游戏没有可部署的解锁 Lua（先拉取或提取）。", "部署", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        // 单选：保持原有体验（部署 + 提示重启）
+        if (targets.Count == 1)
+        {
+            var e = targets[0];
+            try
+            {
+                var r = store.Deploy(e);
+                Log($"✓ 已部署 {e.DisplayName}（{e.AppId}）：Lua→stplug-in、{e.LocalManifests.Count} 个清单→depotcache（共 {r.Files} 个文件）" +
+                    (r.DbRows > 0 ? $"，新增 SteamTools 登记 {r.DbRows} 行" : "") +
+                    (r.DbErrors > 0 ? "（⚠ appids.db 写入失败）" : ""), LogKind.Ok);
+                RefreshAll();
+                await PromptSteamRestartAsync("部署完成。Steam 需要重启后才会看到新的解锁内容。");
+            }
+            catch (Exception ex)
+            {
+                Log("✕ 部署失败: " + ex.Message, LogKind.Err);
+                MessageBox.Show(this, "部署失败：\n" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            return;
+        }
+
+        // 多选：批量部署，结束后统一提示重启
+        var preview = string.Join("\n", targets.Take(8).Select(e => "• " + e.DisplayName + "  (" + e.AppId + ")"));
+        if (targets.Count > 8) preview += $"\n• …等共 {targets.Count} 个";
+        if (MessageBox.Show(this, $"将批量部署 {targets.Count} 个游戏到 Steam 解锁：\n\n{preview}\n\n继续？",
+                "批量部署", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+
+        int ok = 0, fail = 0;
+        UseWaitCursor = true;
         try
         {
-            var r = store.Deploy(e);
-            Log($"✓ 已部署 {e.DisplayName}（{e.AppId}）：Lua→stplug-in、{e.LocalManifests.Count} 个清单→depotcache（共 {r.Files} 个文件）" +
-                (r.DbRows > 0 ? $"，新增 SteamTools 登记 {r.DbRows} 行" : "") +
-                (r.DbErrors > 0 ? "（⚠ appids.db 写入失败）" : ""), LogKind.Ok);
+            foreach (var e in targets)
+            {
+                if (AppBusy(e.AppId)) { Log("⚠ " + e.AppId + " 正在处理中，跳过。", LogKind.Warn); continue; }
+                try
+                {
+                    var r = store.Deploy(e);
+                    ok++;
+                    Log($"✓ 已部署 {e.DisplayName}（{e.AppId}，{r.Files} 个文件，登记 {Math.Max(r.DbRows, 0)} 行）", LogKind.Ok);
+                }
+                catch (Exception ex)
+                {
+                    fail++;
+                    Log("✕ " + e.DisplayName + " 部署失败: " + ex.Message, LogKind.Err);
+                }
+            }
+            Log($"✓ 批量部署完成：成功 {ok}，失败 {fail}。", ok > 0 ? LogKind.Ok : LogKind.Err);
             RefreshAll();
-            await PromptSteamRestartAsync("部署完成。Steam 需要重启后才会看到新的解锁内容。");
         }
-        catch (Exception ex)
-        {
-            Log("✕ 部署失败: " + ex.Message, LogKind.Err);
-            MessageBox.Show(this, "部署失败：\n" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
+        finally { UseWaitCursor = false; }
+        if (ok > 0)
+            await PromptSteamRestartAsync($"批量部署完成（成功 {ok} 个）。Steam 需要重启后才会看到新的解锁内容。");
     }
 
     private async Task RestoreSelectedAsync()
     {
-        var e = Selected();
-        if (e == null) return;
+        var selected = SelectedMany();
 
-        var dcFiles = store.DepotCacheFiles(e);
-        var dbIds = store.RegisteredDbIds(e);
-        string msg = $"将把「{e.DisplayName}」还原成未破解状态：\n\n" +
-                     (e.Deployed ? "• 删除 Steam 注册 Lua:  " + Path.GetFileName(e.DeployedLuaPath) + "\n" : "") +
+        // 多选：批量还原已部署游戏
+        if (selected.Count > 1)
+        {
+            var targets = selected.Where(e => e.Deployed).ToList();
+            if (targets.Count == 0)
+            {
+                MessageBox.Show(this, "选中的游戏里没有已部署的。", "批量还原", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            var preview = string.Join("\n", targets.Take(8).Select(e => "• " + e.DisplayName + "  (" + e.AppId + ")"));
+            if (targets.Count > 8) preview += $"\n• …等共 {targets.Count} 个";
+            if (MessageBox.Show(this,
+                    $"将把以下 {targets.Count} 个已部署游戏还原成未破解状态：\n\n{preview}\n\n继续？",
+                    "批量还原", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
+            int ok = 0, fail = 0, files = 0, rows = 0;
+            UseWaitCursor = true;
+            try
+            {
+                foreach (var e in targets)
+                {
+                    try
+                    {
+                        var r = store.Restore(e, store.S.CleanDepotCache, store.S.CleanAppIdsDb);
+                        ok++;
+                        files += r.LuaDeleted + r.ManifestsDeleted;
+                        rows += r.DbRowsDeleted;
+                        Log($"✓ 已还原 {e.DisplayName}（{e.AppId}）", LogKind.Ok);
+                    }
+                    catch (Exception ex)
+                    {
+                        fail++;
+                        Log("✕ " + e.DisplayName + " 还原失败: " + ex.Message, LogKind.Err);
+                    }
+                }
+                Log($"✓ 批量还原完成：{ok} 个，删除文件 {files} 个，清理登记 {rows} 行" +
+                    (fail > 0 ? $"，失败 {fail}" : ""), ok > 0 ? LogKind.Ok : LogKind.Err);
+                RefreshAll();
+            }
+            finally { UseWaitCursor = false; }
+            if (ok > 0)
+                await PromptSteamRestartAsync($"批量还原完成（{ok} 个）。Steam 重启后这些游戏恢复未破解状态。");
+            return;
+        }
+
+        // 单选：原有流程
+        var e1 = Selected();
+        if (e1 == null) return;
+
+        var dcFiles = store.DepotCacheFiles(e1);
+        var dbIds = store.RegisteredDbIds(e1);
+        string msg = $"将把「{e1.DisplayName}」还原成未破解状态：\n\n" +
+                     (e1.Deployed ? "• 删除 Steam 注册 Lua:  " + Path.GetFileName(e1.DeployedLuaPath) + "\n" : "") +
                      (store.S.CleanDepotCache && dcFiles.Count > 0 ? "• 删除 depotcache 清单 " + dcFiles.Count + " 个\n" : "") +
                      (store.S.CleanAppIdsDb && dbIds.Count > 0 ? "• 清理 appids.db 登记 " + dbIds.Count + " 行\n" : "") +
                      "\n继续？";
@@ -907,8 +1006,8 @@ public class MainForm : Form
 
         try
         {
-            var r = store.Restore(e, store.S.CleanDepotCache, store.S.CleanAppIdsDb);
-            Log($"✓ 已还原 {e.DisplayName}（{e.AppId}）：Lua {r.LuaDeleted} · 清单 {r.ManifestsDeleted} · 登记 {r.DbRowsDeleted}" +
+            var r = store.Restore(e1, store.S.CleanDepotCache, store.S.CleanAppIdsDb);
+            Log($"✓ 已还原 {e1.DisplayName}（{e1.AppId}）：Lua {r.LuaDeleted} · 清单 {r.ManifestsDeleted} · 登记 {r.DbRowsDeleted}" +
                 (r.DbErrors > 0 ? " · ⚠ appids.db 写入失败" : ""), LogKind.Ok);
             RefreshAll();
             await PromptSteamRestartAsync("还原完成。Steam 重启后该游戏恢复为未破解状态。");

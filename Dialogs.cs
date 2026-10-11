@@ -948,6 +948,14 @@ internal class CollectorDialog : Form
         {
             if (grid.IsCurrentCellDirty) grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
         };
+        // 点行上任意位置都切换勾选（复选框格交给内置切换，其余列手动翻转）
+        grid.CellMouseClick += (_, e) =>
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex == 0) return;
+            if (grid.Rows[e.RowIndex].Tag is not CollectSet s || !s.Recognized) return;
+            if (grid.Rows[e.RowIndex].Cells[0] is DataGridViewCheckBoxCell { ReadOnly: false } cell)
+                cell.Value = !(cell.Value is true);
+        };
         grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
         {
             BackColor = Theme.Panel,
