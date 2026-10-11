@@ -10,18 +10,19 @@ internal static class InputDialog
     public static string Show(IWin32Window owner, string title, string label, string defaultValue)
     {
         string result = null;
-        using var f = new Form
+
+        // 标签按文案自适应换行，先量出实际高度再定窗口高（任何 DPI / 长文案都不裁切）
+        var lbl = new Label
         {
-            Text = title,
-            StartPosition = FormStartPosition.CenterParent,
-            FormBorderStyle = FormBorderStyle.FixedDialog,
-            MinimizeBox = false, MaximizeBox = false,
-            ClientSize = new Size(420, 132),
-            BackColor = Theme.Panel,
-            ForeColor = Theme.Text,
+            Text = label,
+            AutoSize = true,
+            MaximumSize = new Size(400, 0),
+            Padding = new Padding(10, 10, 10, 2),
+            ForeColor = Theme.Sub,
             Font = new Font("Microsoft YaHei UI", 9.5f),
         };
-        var lbl = new Label { Text = label, Dock = DockStyle.Top, Height = 34, Padding = new Padding(10, 10, 10, 0), ForeColor = Theme.Sub };
+        int lblH = lbl.GetPreferredSize(new Size(400, 0)).Height;
+
         var txt = new TextBox
         {
             Text = defaultValue,
@@ -30,7 +31,19 @@ internal static class InputDialog
             BackColor = Theme.Input,
             ForeColor = Theme.Text,
             BorderStyle = BorderStyle.FixedSingle,
-            Margin = new Padding(10, 0, 10, 0),
+        };
+        int txtH = txt.PreferredHeight;
+
+        using var f = new Form
+        {
+            Text = title,
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MinimizeBox = false, MaximizeBox = false,
+            ClientSize = new Size(420, lblH + txtH + 46 + 8),
+            BackColor = Theme.Panel,
+            ForeColor = Theme.Text,
+            Font = new Font("Microsoft YaHei UI", 9.5f),
         };
         var flow = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, BackColor = Theme.Panel };
         var btnOk = new Button { Text = "确定", DialogResult = DialogResult.OK, Width = 88, Height = 30 };
