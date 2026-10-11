@@ -10,64 +10,57 @@ internal static class InputDialog
     public static string Show(IWin32Window owner, string title, string label, string defaultValue)
     {
         string result = null;
-        // 全 AutoSize 结构（TableLayoutPanel 行高自适应），任何 DPI / 文案长度都不裁切
+
+        // 纯手工计算布局：各部件实测高度 → 窗口高 → 绝对定位。
+        // 不用 Form.AutoSize / Dock 组合（高 DPI 下被反复证明不可靠：按钮/输入框被裁）。
+        var lbl = new Label
+        {
+            Text = label,
+            AutoSize = true,
+            MaximumSize = new Size(400, 0),
+            Padding = new Padding(10, 8, 10, 0),
+            ForeColor = Theme.Sub,
+            Font = new Font("Microsoft YaHei UI", 9.5f),
+        };
+        int lblH = lbl.GetPreferredSize(new Size(400, 0)).Height;
+
+        var txt = new TextBox
+        {
+            Font = new Font("Microsoft YaHei UI", 11f),
+            BackColor = Theme.Input,
+            ForeColor = Theme.Text,
+            BorderStyle = BorderStyle.FixedSingle,
+        };
+        int txtH = txt.PreferredHeight;
+
+        const int W = 420, BtnW = 88, BtnH = 30, Pad = 10, Gap = 10;
+        int txtY = lblH + 2;
+        int btnY = txtY + txtH + Gap;
         using var f = new Form
         {
             Text = title,
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MinimizeBox = false, MaximizeBox = false,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ClientSize = new Size(W, btnY + BtnH + Pad),
             BackColor = Theme.Panel,
             ForeColor = Theme.Text,
             Font = new Font("Microsoft YaHei UI", 9.5f),
         };
-        var root = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            ColumnCount = 1,
-            Padding = new Padding(0, 4, 0, 8),
-        };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        lbl.SetBounds(0, 0, W, lblH);
+        txt.SetBounds(Pad, txtY, W - Pad * 2, txtH);
 
-        var lbl = new Label
-        {
-            Text = label,
-            AutoSize = true,
-            MaximumSize = new Size(400, 0),
-            Padding = new Padding(10, 10, 10, 4),
-            ForeColor = Theme.Sub,
-        };
-        var txt = new TextBox
-        {
-            Dock = DockStyle.Fill,
-            Width = 400,
-            Font = new Font("Microsoft YaHei UI", 11f),
-            BackColor = Theme.Input,
-            ForeColor = Theme.Text,
-            BorderStyle = BorderStyle.FixedSingle,
-            Margin = new Padding(10, 0, 10, 10),
-        };
-        var flow = new FlowLayoutPanel
-        {
-            FlowDirection = FlowDirection.RightToLeft,
-            AutoSize = true,
-            WrapContents = false,
-            Anchor = AnchorStyles.Right,
-            Margin = new Padding(0, 0, 10, 0),
-        };
-        var btnOk = new Button { Text = "确定", DialogResult = DialogResult.OK, Width = 88, Height = 30 };
-        var btnCancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Width = 88, Height = 30, Margin = new Padding(0, 0, 8, 0) };
+        var btnOk = new Button { Text = "确定", DialogResult = DialogResult.OK };
+        var btnCancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel };
+        btnOk.SetBounds(W - Pad - BtnW, btnY, BtnW, BtnH);
+        btnCancel.SetBounds(W - Pad - BtnW * 2 - 8, btnY, BtnW, BtnH);
         btnOk.FlatAppearance.BorderSize = 0; btnOk.FlatStyle = FlatStyle.Flat; btnOk.BackColor = Theme.Accent; btnOk.ForeColor = Color.White;
         btnCancel.FlatAppearance.BorderSize = 0; btnCancel.FlatStyle = FlatStyle.Flat; btnCancel.BackColor = Theme.Input; btnCancel.ForeColor = Theme.Text;
-        flow.Controls.Add(btnCancel); flow.Controls.Add(btnOk);
 
-        root.Controls.Add(lbl, 0, 0);
-        root.Controls.Add(txt, 0, 1);
-        root.Controls.Add(flow, 0, 2);
-        f.Controls.Add(root);
+        f.Controls.Add(lbl);
+        f.Controls.Add(txt);
+        f.Controls.Add(btnOk);
+        f.Controls.Add(btnCancel);
         f.AcceptButton = btnOk; f.CancelButton = btnCancel;
         if (f.ShowDialog(owner) == DialogResult.OK) result = txt.Text;
         return result;
