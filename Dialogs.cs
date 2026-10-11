@@ -1322,14 +1322,22 @@ internal class CollectorDialog : Form
         try
         {
             var owned = await extractor.GetOwnedAppsAsync(CancellationToken.None, ExtractLog());
-            var names = await Store.FetchAllAppNamesAsync(store.ProxyEff, ExtractLog());
+            // 名称按需获取：列表默认显示 AppID，输游戏名按回车联网搜索后自动记住
             var games = owned.OrderBy(id => id)
-                .Select(id => ((long)id, names.TryGetValue((uint)id, out var n) && !string.IsNullOrEmpty(n) ? n : "(未登记名)"))
+                .Select(id => ((long)id, store.Records.TryGetValue(id, out var r) ? (r.Name ?? r.FetchedName) ?? "(未登记名)" : "(未登记名)"))
                 .ToList();
             if (games.Count == 0) { AppendLog("已拥有列表为空。", Theme.Yellow); return; }
-            using var chooser = new GameChooser(games, "选择要提取的游戏：", store);
+            using var chooser = new GameChooser(games, "选择要提取的游戏（输名字按回车搜索）：", store);
             if (chooser.ShowDialog(this) == DialogResult.OK)
+            {
+                // 搜到的名字记进 games.json，下次本地过滤直接命中
+                if (!store.Records.TryGetValue(chooser.PickId, out var rec))
+                    store.Records[chooser.PickId] = rec = new GameRecord { AppId = chooser.PickId };
+                if (!string.IsNullOrEmpty(chooser.PickName) && chooser.PickName != "(未登记名)")
+                    rec.FetchedName ??= chooser.PickName;
+                store.SaveRecords();
                 await RunExtractAsync(chooser.PickId);
+            }
         }
         catch (NeedsLoginException)
         {
