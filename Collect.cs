@@ -30,6 +30,7 @@ internal static class Collector
         public bool Recognized;         // 是否识别出 AppID（未识别不可上传）
         public string Dir;              // 所在目录（散装集合 = 扫描根目录）
         public string DisplayName;
+        public string Source = "";      // "Steam 提取" = 内置提取器产出（含 .steam-extract 标记）
         public string Note = "";        // 附加说明（无法识别 / 重复 / 名称冲突）
         public List<string> Manifests = new();
         public string VdfLocal;         // Key.vdf / config.vdf 本地路径（可空）
@@ -272,6 +273,8 @@ internal static class Collector
             else if (appId > 0 && name.Equals(appId + ".lua", StringComparison.OrdinalIgnoreCase))
                 set.HasLua = true;
         }
+        if (File.Exists(System.IO.Path.Combine(dir, ".steam-extract")))
+            set.Source = "Steam 提取";
         set.TotalBytes = set.Manifests.Sum(f => { try { return new FileInfo(f).Length; } catch { return 0L; } });
         if (set.VdfLocal != null) set.TotalBytes += new FileInfo(set.VdfLocal).Length;
         return set;

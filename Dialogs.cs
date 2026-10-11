@@ -958,19 +958,21 @@ internal class CollectorDialog : Form
             SelectionBackColor = Color.FromArgb(43, 58, 90),
             SelectionForeColor = Theme.Text,
         };
-        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "cCheck", HeaderText = "", Width = 40, AutoSizeMode = DataGridViewAutoSizeColumnMode.None });
+        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "cCheck", HeaderText = "选", Width = 40, AutoSizeMode = DataGridViewAutoSizeColumnMode.None });
         grid.Columns.Add("cId", "AppID");
         grid.Columns.Add("cName", "名称");
+        grid.Columns.Add("cSrc", "来源");
         grid.Columns.Add("cCount", "清单数");
         grid.Columns.Add("cVdf", "Key.vdf");
         grid.Columns.Add("cSize", "大小");
         grid.Columns.Add("cState", "状态");
         grid.Columns[1].FillWeight = 70;
-        grid.Columns[2].FillWeight = 160;
-        grid.Columns[3].FillWeight = 55;
-        grid.Columns[4].FillWeight = 55;
-        grid.Columns[5].FillWeight = 60;
-        grid.Columns[6].FillWeight = 130;
+        grid.Columns[2].FillWeight = 150;
+        grid.Columns[3].FillWeight = 65;
+        grid.Columns[4].FillWeight = 50;
+        grid.Columns[5].FillWeight = 50;
+        grid.Columns[6].FillWeight = 55;
+        grid.Columns[7].FillWeight = 120;
 
         // ---------- 底部按钮行 + 日志（AutoSize，任何 DPI 不裁字） ----------
         var btnAll = new Button { Text = "全选/全不选" };
@@ -1094,16 +1096,18 @@ internal class CollectorDialog : Form
                 s.Recognized,
                 s.Recognized ? s.AppId.ToString() : "—",
                 s.DisplayName,
+                string.IsNullOrEmpty(s.Source) ? "—" : s.Source,
                 s.Manifests.Count.ToString(),
                 s.VdfLocal != null ? "✓" : "—",
                 s.TotalBytes >= 1024 * 1024 ? (s.TotalBytes / 1024.0 / 1024).ToString("F1") + " MB" : (s.TotalBytes / 1024.0).ToString("F0") + " KB",
                 s.Recognized ? "待上传" : s.Note);
             grid.Rows[i].Tag = s;
+            grid.Rows[i].Cells[3].Style.ForeColor = string.IsNullOrEmpty(s.Source) ? Theme.Sub : Theme.Green;
             if (!s.Recognized)
             {
                 grid.Rows[i].Cells[0].Value = false;
                 grid.Rows[i].Cells[0].ReadOnly = true;
-                grid.Rows[i].Cells[6].Style.ForeColor = Theme.Sub;
+                grid.Rows[i].Cells[7].Style.ForeColor = Theme.Sub;
             }
         }
         int ok = sets.Count(s => s.Recognized);
@@ -1162,8 +1166,8 @@ internal class CollectorDialog : Form
 
     void SetRowState(DataGridViewRow row, string state, Color color)
     {
-        row.Cells[6].Value = state;
-        row.Cells[6].Style.ForeColor = color;
+        row.Cells[7].Value = state;
+        row.Cells[7].Style.ForeColor = color;
     }
 
     // ---------- 上传 ----------

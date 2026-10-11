@@ -411,6 +411,8 @@ internal sealed class SteamExtractor : IDisposable
         foreach (char c in Path.GetInvalidFileNameChars()) dirName = dirName.Replace(c, '_');
         string dir = existingDir ?? Path.Combine(rootDir, dirName);
         Directory.CreateDirectory(dir);
+        // 来源标记：本目录由内置提取器从该账号的 Steam 库提取（清单收集扫描时区分来源，不随上传）
+        try { File.WriteAllText(System.IO.Path.Combine(dir, ".steam-extract"), DateTime.Now.ToString("s")); } catch { }
 
         // 5) 逐 depot：密钥 → CDN 下载 manifest
         var servers = (await steamContent.GetServersForSteamPipe(null, null).ConfigureAwait(false))
