@@ -1,5 +1,7 @@
 namespace GamerToolManager;
 
+using System.Runtime.InteropServices;
+
 internal static class Program
 {
     [STAThread]
@@ -61,6 +63,60 @@ internal static class Program
             }
             Console.WriteLine(ok == sets.Count ? "COLLECTTEST OK" : "COLLECTTEST FAILED");
             return ok == sets.Count ? 0 : 1;
+        }
+
+        // 文档截图模式：--shot <outdir>，依次打开主窗 / 清单收集 / 导入预览并各截一张 PNG（README 与 Release 用）
+        if (args.Length > 1 && args[0].Equals("--shot", StringComparison.OrdinalIgnoreCase))
+        {
+            var store = new Store();
+            store.Load();
+            ApplicationConfiguration.Initialize();
+            string outDir = args[1];
+            Directory.CreateDirectory(outDir);
+
+            void Snap(Form f, string name)
+            {
+                f.Shown += async (_, _) =>
+                {
+                    await Task.Delay(2500); // 等列表/扫描/名字填充
+                    try
+                    {
+                        // PrintWindow 直接渲染窗口内容：窗口被浏览器盖住/没有前台焦点也截得到
+                        var rc = new NativeShot.ShotRect();
+                        NativeShot.GetWindowRect(f.Handle, out rc);
+                        using var bmp = new Bitmap(rc.Right - rc.Left, rc.Bottom - rc.Top);
+                        using (var g = Graphics.FromImage(bmp))
+                        {
+                            g.Clear(Theme.Back);
+                            var hdc = g.GetHdc();
+                            NativeShot.PrintWindow(f.Handle, hdc, 2); // 2 = PW_RENDERFULLCONTENT
+                            g.ReleaseHdc(hdc);
+                        }
+                        bmp.Save(Path.Combine(outDir, name), System.Drawing.Imaging.ImageFormat.Png);
+                        Console.WriteLine("SAVED " + name + " " + bmp.Width + "x" + bmp.Height);
+                    }
+                    catch (Exception ex) { Console.WriteLine("SHOT FAIL " + name + ": " + ex.Message); }
+                    f.Close();
+                };
+            }
+
+            var m = new MainForm();
+            Snap(m, "main.png");
+            Application.Run(m);
+
+            var cd = new CollectorDialog(store);
+            Snap(cd, "collect.png");
+            Application.Run(cd);
+
+            string pack = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "GamerTool清单包_20261011.gtm");
+            if (File.Exists(pack))
+            {
+                var info = ManifestPack.Inspect(pack);
+                var ipd = new ImportPackDialog(store, info);
+                Snap(ipd, "import.png");
+                Application.Run(ipd);
+            }
+            return 0;
         }
 
         // 布局实测模式：打开拉取对话框 0.8 秒，输出所有控件坐标
@@ -180,10 +236,22 @@ internal static class Program
     }
 }
 
+// ---------------- 文档截图用的 Win32（PrintWindow 不依赖前台焦点） ----------------
+internal static class NativeShot
+{
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ShotRect { public int Left, Top, Right, Bottom; }
+
+    [DllImport("user32.dll")]
+    internal static extern bool GetWindowRect(IntPtr hWnd, out ShotRect r);
+
+    [DllImport("user32.dll")]
+    internal static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
+}
+
 /// <summary>无界面自检：核心逻辑（扫描 / GBK / SQLite / Steam 检测）不依赖窗口即可验证。</summary>
 internal static class SelfTest
-{
-    public static int Run()
+{    public static int Run()
     {
         int fail = 0;
         Action<string, bool> check = (name, ok) =>
