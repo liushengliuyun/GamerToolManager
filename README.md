@@ -10,9 +10,9 @@
 
 | 功能 | 说明 |
 |---|---|
+| ⭐ 清单收集与上传 | **本工具最大特色：内置清单上传** —— 登录 Steam 提取已拥有游戏的清单，一键上传社区收集库（SHA 去重、只增不删、冲突保护），形成 提取→上传→拉取 闭环；详见下方专章 |
 | 📥 拉取清单 | 输入 AppID / 游戏名 / 粘贴商店链接，自动从多个清单仓库（分支即 AppID 的组织形式）检索并下载清单与 Key.vdf，**多任务并发** |
 | 🛜 清单提取 | 登录自己的 Steam 账号（Steam Guard 支持，本机只存 refresh token 不存密码），从**已拥有**的游戏直接提取 depot 密钥与最新 manifest，生成与拉取同构的 `[AppID]` 目录 |
-| 📤 清单收集 | 扫描收集目录（`[AppID]` 文件夹 / 散装 manifest+Key.vdf），批量上传到社区收集库 [GamerToolManifests](https://github.com/liushengliuyun/GamerToolManifests)（一个 AppID 一个分支），SHA 去重、只增不删、冲突保护；该仓库同时加入拉取镜像末尾，形成 提取→上传→拉取 闭环 |
 | 📦 清单包 | 把选中的本地清单（支持 Ctrl 多选）导出成**一个 .gtm 文件**分享；对方点主界面【导入清单】选择文件或把 .gtm 拖进主窗口即可导入，导入后选中即可部署 |
 | 🚀 部署解锁 | Lua → `stplug-in`、清单 → `depotcache`、addappid 目标登记进 `appids.db`，等价于拖 SteamTools 悬浮窗 |
 | ↩️ 还原未破解 | 精确删除该游戏的 Lua / 清单 / 登记行；支持一键"还原全部" |
@@ -20,6 +20,19 @@
 | 🧹 孤儿登记清理 | 清理 appids.db 中无 Lua 覆盖的残留登记 |
 | 🪟 布局记忆 | 窗口宽高、分割线位置、最大化状态关窗即存 |
 | 🎨 细节 | 双击复制游戏名/AppID、注册时间显示与排序、空文件夹标记、回收站删除、CJK/高 DPI 自适应布局 |
+
+## 📤 清单收集与上传 —— 你的提取就是别人的清单源
+
+**本工具内置清单上传**。清单的源头是"拥有游戏的人向 Steam 提取"，你的提取产物上传到社区收集库
+[GamerToolManifests](https://github.com/liushengliuyun/GamerToolManifests) 后，所有用户拉取时都会自动检索到它
+—— 形成 **提取 → 上传 → 大家拉取** 的闭环，别人"未收录"的游戏，可能就差你这一份：
+
+![清单收集与上传](docs/collect.png)
+
+1. 工具栏点【清单收集】→ 第二行【登录 Steam】输一次账号密码（只存本机 refresh token，密码不留存）
+2. 【从 Steam 提取】输 AppID / 游戏名 / 商店链接，或点【从已拥有列表选】→ 生成 `[AppID]` 文件夹
+3. 扫描列表勾选要贡献的清单集 → 点【上传选中】（上传令牌已内置，开箱即传；SHA 去重、只增不删、冲突保护）
+4. 上传后其他用户在主界面输入该 AppID 即可拉取到；该仓库也挂在拉取镜像末尾，形成闭环
 
 ## 📦 下载
 
@@ -63,18 +76,7 @@
                     【还原未破解】 · 【重新拉取/重新提取】随时更新
 ```
 
-### 📤 清单收集与上传 —— 你的提取就是别人的清单源
-
-**本工具内置清单上传**。清单的源头是"拥有游戏的人向 Steam 提取"，你的提取产物上传到社区收集库
-[GamerToolManifests](https://github.com/liushengliuyun/GamerToolManifests) 后，所有用户拉取时都会自动检索到它
-—— 形成 **提取 → 上传 → 大家拉取** 的闭环，别人"未收录"的游戏，可能就差你这一份：
-
-![清单收集与上传](docs/collect.png)
-
-1. 工具栏点【清单收集】→ 第二行【登录 Steam】输一次账号密码（只存本机 refresh token，密码不留存）
-2. 【从 Steam 提取】输 AppID / 游戏名 / 商店链接，或点【从已拥有列表选】→ 生成 `[AppID]` 文件夹
-3. 扫描列表勾选要贡献的清单集 → 点【上传选中】（上传令牌已内置，开箱即传；SHA 去重、只增不删、冲突保护）
-4. 上传后其他用户在主界面输入该 AppID 即可拉取到；该仓库也挂在拉取镜像末尾，形成闭环
+（清单上传详见上方「📤 清单收集与上传」专章 —— 提取、上传、拉取、清单包共用同一套 `[AppID]` 文件夹结构。）
 
 ### 📥 导入别人分享的清单包
 
@@ -97,6 +99,8 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
   -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o publish-sc
 ```
 
+> 发布规则与 Release 说明模板见 [RELEASE.md](RELEASE.md)（每个 Release 说明必须含 清单流转/上传/导入 三个固定章节）。
+>
 > **上传令牌（维护者）**：公开源码构建不带上传令牌 —— 清单收集的"扫描/提取"可用，"上传"会提示配置。
 > 启用方法：复制 `Secrets.cs.example` 为 `Secrets.cs`（已被 `.gitignore` 排除，绝不提交），
 > 在 [GitHub → Settings → Developer settings → Fine-grained personal access tokens](https://github.com/settings/personal-access-tokens/new)
