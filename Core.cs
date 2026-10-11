@@ -634,7 +634,7 @@ public partial class Store
     public DeployResult Deploy(GameEntry e)
     {
         if (!e.SourceLuaExists || string.IsNullOrEmpty(e.Folder))
-            throw new InvalidOperationException("游戏文件夹中没有生成解锁 Lua，请先拉取。");
+            throw new InvalidOperationException("清单文件夹中没有生成解锁 Lua，请先拉取。");
         string st = StPluginEff;
         if (string.IsNullOrEmpty(st)) throw new InvalidOperationException("未找到 Steam 目录。");
         Directory.CreateDirectory(st);

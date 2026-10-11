@@ -387,7 +387,7 @@ public class MainForm : Form
             field = b;
             return b;
         }
-        ActBtn("打开游戏文件夹", ref btnOpenFolder, (_, _) => OpenExplorer(Selected()?.Folder));
+        ActBtn("打开清单文件夹", ref btnOpenFolder, (_, _) => OpenExplorer(Selected()?.Folder));
         ActBtn("部署到 Steam 解锁", ref btnDeploy, async (_, _) => await DeploySelectedAsync());
         ActBtn("重新拉取清单", ref btnRePull, async (_, _) => await RePullSelectedAsync());
         ActBtn("重新从 Steam 提取", ref btnReExtract, async (_, _) => await ReExtractSelectedAsync());
@@ -395,7 +395,7 @@ public class MainForm : Form
         ActBtn("还原未破解", ref btnRestore, async (_, _) => await RestoreSelectedAsync(), danger: true);
         ActBtn("定位已部署 Lua", ref btnLocate, (_, _) => LocateDeployed());
         ActBtn("删除 Lua 文件", ref btnDelLua, (_, _) => DeleteSourceLua(), danger: true);
-        ActBtn("删除游戏文件夹", ref btnDelFolder, (_, _) => DeleteGameFolder(), danger: true);
+        ActBtn("删除清单文件夹", ref btnDelFolder, (_, _) => DeleteGameFolder(), danger: true);
         ActBtn("重命名", ref btnRename, (_, _) => RenameSelected());
         ActBtn("抓取游戏名", ref btnFetch, async (_, _) => await FetchSelectedNameAsync());
 
@@ -589,7 +589,7 @@ public class MainForm : Form
         var dbIds = store.RegisteredDbIds(e);
         lblInfo.Text =
             "AppID:   " + e.AppId + "\n" +
-            "本地:     " + (e.FolderExists ? e.Folder : "（游戏文件夹不存在）") + "\n" +
+            "本地:     " + (e.FolderExists ? e.Folder : "（清单文件夹不存在）") + "\n" +
             "Lua:      " + (e.SourceLuaExists ? "✓ 已生成" : "— 未生成") + "\n" +
             "Steam:  " + (e.Deployed ? "● 已注册解锁" : "○ 未注册") + "\n" +
             "清单:     本地 " + e.LocalManifests.Count + " 个 · depotcache 占用 " + dcFiles + " 个\n" +
@@ -599,7 +599,7 @@ public class MainForm : Form
         if (e.Empty)
             lblHint.Text = "⚠ 拉取文件夹存在但未生成解锁 Lua（拉取失败或该游戏不在清单仓库）—— 无法注册，可删除文件夹后重新拉取。";
         else if (e.Deployed && !e.FolderExists)
-            lblHint.Text = "该游戏已在 Steam 注册，但本地游戏文件夹已删除 —— 仍可直接【还原未破解】。";
+            lblHint.Text = "该游戏已在 Steam 注册，但本地清单文件夹已删除 —— 仍可直接【还原未破解】。";
         else if (!e.Deployed && e.FolderExists)
             lblHint.Text = "已拉取但未部署 —— 点击【部署到 Steam】注册解锁。";
     }
@@ -962,7 +962,7 @@ public class MainForm : Form
         var e = Selected();
         if (e == null || !e.SourceLuaExists) return;
         string lua = Path.Combine(e.Folder, e.AppId + ".lua");
-        if (MessageBox.Show(this, "删除游戏文件夹中的解锁 Lua？（移入回收站）\n" + lua,
+        if (MessageBox.Show(this, "删除清单文件夹中的解锁 Lua？（移入回收站）\n" + lua,
                 "删除 Lua", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             return;
         if (Native.RecycleDelete(lua))
@@ -980,8 +980,8 @@ public class MainForm : Form
     {
         var e = Selected();
         if (e == null || !e.FolderExists) return;
-        if (MessageBox.Show(this, "将整个游戏文件夹移入回收站（可恢复）：\n" + e.Folder,
-                "删除游戏文件夹", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+        if (MessageBox.Show(this, "将整个清单文件夹移入回收站（可恢复）：\n" + e.Folder,
+                "删除清单文件夹", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             return;
         if (Native.RecycleDelete(e.Folder))
         {
@@ -1217,7 +1217,7 @@ public class MainForm : Form
         };
         if (set.Manifests.Count == 0 && set.VdfLocal == null)
         {
-            MessageBox.Show(this, "该游戏文件夹里没有清单和 Key.vdf，无法上传。\n请先拉取或提取。", "上传清单", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "该文件夹里没有清单和 Key.vdf，无法上传。\n请先拉取或提取。", "上传清单", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
         if (MessageBox.Show(this,

@@ -260,7 +260,7 @@ internal class PullDialog : Form
         var after = FolderIds();
         var fresh = after.Except(before).ToList();
         if (fresh.Count > 0)
-            AppendLog("✓ 拉取完成，生成游戏文件夹: " + string.Join(", ", fresh.Select(id => "[" + id + "]")), Theme.Green);
+            AppendLog("✓ 拉取完成，生成清单文件夹: " + string.Join(", ", fresh.Select(id => "[" + id + "]")), Theme.Green);
         else if (code == 0)
             AppendLog("✓ 工具执行完成（未出现新文件夹 —— 可能该游戏已存在）。", Theme.Green);
         else
