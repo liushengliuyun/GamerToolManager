@@ -943,6 +943,11 @@ internal class CollectorDialog : Form
         grid.ColumnHeadersHeight = 32;
         grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
         grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+        // 复选框点击即时提交，保证外部读取单元格值可靠
+        grid.CurrentCellDirtyStateChanged += (_, _) =>
+        {
+            if (grid.IsCurrentCellDirty) grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+        };
         grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
         {
             BackColor = Theme.Panel,
@@ -1093,7 +1098,7 @@ internal class CollectorDialog : Form
         foreach (var s in sets)
         {
             int i = grid.Rows.Add(
-                s.Recognized,
+                false, // 默认不勾选，勾谁传谁
                 s.Recognized ? s.AppId.ToString() : "—",
                 s.DisplayName,
                 string.IsNullOrEmpty(s.Source) ? "—" : s.Source,
