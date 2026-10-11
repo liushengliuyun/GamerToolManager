@@ -50,6 +50,7 @@ public class Settings
     public int SplitTop { get; set; } = 0;  // 列表 | 详情 分割位置
     public int SplitMain { get; set; } = 0; // 主区 | 日志 分割位置
     public int RegSort { get; set; } = 0;   // 游戏排序: 0=默认 1=注册时间最新在上 2=最旧在上
+    public Dictionary<string, int[]> DialogSizes { get; set; } = new(); // 二级窗口宽高记忆（key → [宽,高]）
 
     public string NormalExe => ResolveTool("Manifest2Lua.exe");
     public string NolockExe => ResolveTool("Manifest2Lua-nolock.exe");
@@ -443,6 +444,23 @@ public partial class Store
     {
         var list = Records.Values.OrderBy(r => r.AppId).ToList();
         try { File.WriteAllText(GamesPath, JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true })); } catch { }
+    }
+
+    // ---------- 二级窗口宽高记忆 ----------
+    /// <summary>按 key 读取记忆的窗口宽高；没有有效记忆返回 Size.Empty（调用方用各自默认值）。</summary>
+    public Size LoadDialogSize(string key)
+    {
+        if (S.DialogSizes.TryGetValue(key, out var wh) && wh is { Length: 2 } &&
+            wh[0] >= 300 && wh[1] >= 240)
+            return new Size(wh[0], wh[1]);
+        return Size.Empty;
+    }
+
+    /// <summary>关窗时把宽高记进 settings.json，下次同窗口自动恢复。</summary>
+    public void SaveDialogSize(string key, int w, int h)
+    {
+        S.DialogSizes[key] = new[] { w, h };
+        SaveSettings();
     }
 
     // ---------- 路径解析 ----------

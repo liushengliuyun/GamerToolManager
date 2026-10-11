@@ -449,6 +449,7 @@ internal class OrphanDialog : Form
 {
     private readonly Store store;
     private readonly List<long> ids;
+    private readonly List<long> rowIds = new(); // 与 list.Items 平行的 AppID（显示名后仍按行号对应）
     private readonly CheckedListBox list = new();
 
     public OrphanDialog(Store store, List<long> ids)
@@ -461,11 +462,15 @@ internal class OrphanDialog : Form
         BackColor = Theme.Back;
         ForeColor = Theme.Text;
         Font = new Font("Microsoft YaHei UI", 9.5f);
+        var mem = store.LoadDialogSize("orphan");
+        if (mem != Size.Empty) Size = mem;
+        FormClosing += (_, _) => store.SaveDialogSize("orphan", Width, Height);
 
         var lbl = new Label
         {
             Dock = DockStyle.Top,
             AutoSize = true,
+            MaximumSize = new Size(500, 0),
             Text = "以下 AppID 登记在 SteamTools 的 appids.db 中，但没有任何解锁 Lua 覆盖它们，\n" +
                    "通常是 Lua 已被删除后的残留。勾选要清理的项（默认全选），点击清理。\n" +
                    "注意：如果这些是你仍需要的功能（如悬浮窗登记的解密 Key），请不要清理。",
@@ -503,6 +508,7 @@ internal class OrphanDialog : Form
         foreach (long id in ids)
         {
             int i = list.Items.Add(id.ToString(), true);
+            rowIds.Add(id);
         }
 
         btnAll.Click += (_, _) =>
@@ -516,7 +522,7 @@ internal class OrphanDialog : Form
         {
             var targets = new List<long>();
             for (int i = 0; i < list.Items.Count; i++)
-                if (list.GetItemChecked(i)) targets.Add(long.Parse((string)list.Items[i]));
+                if (list.GetItemChecked(i)) targets.Add(rowIds[i]);
             if (targets.Count == 0) return;
             if (MessageBox.Show(this, "将从 appids.db 删除 " + targets.Count + " 行登记，确定？",
                 "确认", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
@@ -527,24 +533,66 @@ internal class OrphanDialog : Form
                 n >= 0 ? MessageBoxIcon.Information : MessageBoxIcon.Error);
             if (n > 0)
             {
-                foreach (var t in targets)
-                    for (int i = 0; i < list.Items.Count; i++)
-                        if ((string)list.Items[i] == t.ToString()) { list.Items.RemoveAt(i); break; }
+                for (int i = list.Items.Count - 1; i >= 0; i--)
+                    if (list.GetItemChecked(i)) { list.Items.RemoveAt(i); rowIds.RemoveAt(i); }
             }
         };
 
+        // 打开即补名字：先用本地缓存，缺的联网抓并写回 games.json（下次打开直接显示）
+        Shown += async (_, _) =>
+        {
+            bool dirty = false;
+            for (int i = 0; i < rowIds.Count; i++)
+            {
+                string cached = store.Records.TryGetValue(rowIds[i], out var r0) ? (r0.Name ?? r0.FetchedName) : null;
+                if (!string.IsNullOrWhiteSpace(cached))
+                    SetRowText(i, rowIds[i], cached);
+            }
+            foreach (var id in rowIds.ToList())
+            {
+                bool hasName = store.Records.TryGetValue(id, out var rec) &&
+                               (!string.IsNullOrWhiteSpace(rec.Name) || !string.IsNullOrWhiteSpace(rec.FetchedName));
+                if (hasName) continue;
+                string n = null;
+                try { n = await Store.FetchGameNameAsync(id, store.ProxyEff); } catch { }
+                if (IsDisposed) return;
+                if (n != null)
+                {
+                    if (!store.Records.TryGetValue(id, out rec)) store.Records[id] = rec = new GameRecord { AppId = id };
+                    rec.FetchedName = n;
+                    dirty = true;
+                    SetRowText(rowIds.IndexOf(id), id, n);
+                }
+                await Task.Delay(250);
+                if (IsDisposed) return;
+            }
+            if (dirty) store.SaveRecords();
+        };
+
         btnClose.Click += (_, _) => Close();
+    }
+
+    /// <summary>行文本改为 “AppID  名字”，保持勾选状态不变。</summary>
+    void SetRowText(int i, long id, string name)
+    {
+        if (i < 0 || string.IsNullOrWhiteSpace(name)) return;
+        bool chk = list.GetItemChecked(i);
+        list.Items[i] = id + "  " + name;
+        list.SetItemChecked(i, chk);
     }
 }
 
 // ---------------- 使用教程查看器 ----------------
 internal class TutorialDialog : Form
 {
-    public TutorialDialog(string path)
+    public TutorialDialog(Store store, string path)
     {
         Text = "使用教程";
         StartPosition = FormStartPosition.CenterParent;
         ClientSize = new Size(780, 640);
+        var mem = store.LoadDialogSize("tutorial");
+        if (mem != Size.Empty) Size = mem;
+        FormClosing += (_, _) => store.SaveDialogSize("tutorial", Width, Height);
         BackColor = Color.FromArgb(18, 20, 26);
         ForeColor = Theme.Text;
         Font = new Font("Microsoft YaHei UI", 9.5f);
@@ -1454,6 +1502,9 @@ internal class ImportPackDialog : Form
         BackColor = Theme.Back;
         ForeColor = Theme.Text;
         Font = new Font("Microsoft YaHei UI", 9.5f);
+        var mem = store.LoadDialogSize("importpack");
+        if (mem != Size.Empty) Size = mem;
+        FormClosing += (_, _) => store.SaveDialogSize("importpack", Width, Height);
 
         // ---------- 顶部信息（FlowLayoutPanel 自适应，DPI 安全） ----------
         var top = new FlowLayoutPanel
@@ -1468,6 +1519,7 @@ internal class ImportPackDialog : Form
         };
         top.Controls.Add(new Label
         {
+            MaximumSize = new Size(750, 0),
             Text = $"清单包含 {info.Games.Count} 个游戏 · 解压后约 {ManifestPack.FmtBytes(info.TotalBytes)} · 包文件 {ManifestPack.FmtBytes(info.PackBytes)}" +
                    (string.IsNullOrWhiteSpace(info.ExportedAt) ? "" : $" · 导出于 {info.ExportedAt}"),
             AutoSize = true,
@@ -1475,6 +1527,7 @@ internal class ImportPackDialog : Form
         });
         top.Controls.Add(new Label
         {
+            MaximumSize = new Size(750, 0),
             Text = "导入后清单落在 GamerTool 目录的 [AppID] 文件夹，选中游戏点【部署到 Steam 解锁】即可注册。已存在的游戏默认跳过。",
             AutoSize = true,
             ForeColor = Theme.Sub,

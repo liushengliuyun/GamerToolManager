@@ -696,7 +696,7 @@ public class MainForm : Form
         string path = Path.Combine(AppContext.BaseDirectory, "使用教程.txt");
         if (!File.Exists(path))
             path = Path.Combine(store.S.GamerToolDir, "使用教程.txt");
-        using var d = new TutorialDialog(path);
+        using var d = new TutorialDialog(store, path);
         d.ShowDialog(this);
     }
 

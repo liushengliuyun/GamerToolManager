@@ -124,6 +124,36 @@ internal static class Program
                 cd.Close();
             };
             Application.Run(cd);
+
+            var od = new OrphanDialog(store, new List<long> { 404010, 404012, 730 });
+            od.Shown += async (_, _) =>
+            {
+                await Task.Delay(2500);
+                void Dump5(Control c, int depth)
+                {
+                    Console.WriteLine(new string(' ', depth * 2) + c.GetType().Name + "  " + c.Bounds);
+                    foreach (Control k in c.Controls) Dump5(k, depth + 1);
+                }
+                Dump5(od, 0);
+                od.Close();
+            };
+            Application.Run(od);
+
+            var pi = new ManifestPack.PackInfo { PackPath = "layouttest.gtm" };
+            pi.Games.Add(new ManifestPack.PackGame { AppId = 460900, Name = "测试游戏", FileCount = 3, ManifestCount = 1, HasLua = true, HasKeyVdf = true, TotalBytes = 123456 });
+            var ipd = new ImportPackDialog(store, pi);
+            ipd.Shown += async (_, _) =>
+            {
+                await Task.Delay(1200);
+                void Dump6(Control c, int depth)
+                {
+                    Console.WriteLine(new string(' ', depth * 2) + c.GetType().Name + "  " + c.Bounds);
+                    foreach (Control k in c.Controls) Dump6(k, depth + 1);
+                }
+                Dump6(ipd, 0);
+                ipd.Close();
+            };
+            Application.Run(ipd);
             return 0;
         }
 
