@@ -179,7 +179,7 @@ internal static class Collector
     /// 扫描收集目录下的清单集：[AppID]xxx 子文件夹（可带游戏名后缀）、含 *.manifest / &lt;AppID&gt;.lua 的其他文件夹、
     /// 以及散落在根目录的文件（构成一个伪集合）。绝不从 manifest 文件名推断 AppID（那是 depotId）。
     /// </summary>
-    public static List<CollectSet> ScanCollectionDir(string root)
+    public static List<CollectSet> ScanCollectionDir(string root, Store store = null)
     {
         var list = new List<CollectSet>();
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return list;
@@ -192,7 +192,7 @@ internal static class Collector
                 var m = RxFolder.Match(name);
                 if (m.Success)
                 {
-                    AddSet(list, MakeSet(dir, long.Parse(m.Groups[1].Value), name[(m.Groups[1].Length + 2)..]));
+                    AddSet(list, MakeSet(dir, long.Parse(m.Groups[1].Value), name[(m.Groups[1].Length + 2)..], store));
                     continue;
                 }
                 // 无 [appid] 前缀：像清单集才收（含 *.manifest 或 <appid>.lua/.json）
@@ -201,11 +201,11 @@ internal static class Collector
                                  || files.Any(f => RxLua.IsMatch(Path.GetFileName(f)));
                 if (!looksLikeSet) continue;
                 long? id = InferAppId(files);
-                var set = MakeSet(dir, id ?? 0, name);
+                var set = MakeSet(dir, id ?? 0, name, store);
                 if (id == null)
                 {
                     set.Recognized = false;
-                    set.Note = "无法识别 AppID（需要 [AppID] 文件夹名或 <AppID>.lua）";
+                    set.Note = "无法识别 AppID（需要 [AppID] 文件夹名或 <AppID>.lua）；重命名为 [AppID] 即可识别";
                 }
                 AddSet(list, set);
             }
@@ -219,7 +219,7 @@ internal static class Collector
             if (loose.Count > 0)
             {
                 long? id = InferAppId(loose);
-                var set = MakeSet(root, id ?? 0, "（根目录散装文件）");
+                var set = MakeSet(root, id ?? 0, "（根目录散装文件）", store);
                 if (id == null)
                 {
                     set.Recognized = false;
@@ -259,7 +259,7 @@ internal static class Collector
         return null;
     }
 
-    static CollectSet MakeSet(string dir, long appId, string displayName)
+    static CollectSet MakeSet(string dir, long appId, string displayName, Store store = null)
     {
         var set = new CollectSet { Dir = dir, AppId = appId, Recognized = appId > 0, DisplayName = displayName };
         foreach (var f in SafeFiles(dir))
@@ -272,6 +272,14 @@ internal static class Collector
                 set.VdfLocal = f;
             else if (appId > 0 && name.Equals(appId + ".lua", StringComparison.OrdinalIgnoreCase))
                 set.HasLua = true;
+        }
+        // 名称兜底：文件夹没带游戏名时用 games.json 的记录
+        if (appId > 0 && string.IsNullOrWhiteSpace(set.DisplayName))
+        {
+            string n = null;
+            if (store?.Records != null && store.Records.TryGetValue(appId, out var r))
+                n = r.FetchedName ?? r.Name;
+            if (!string.IsNullOrWhiteSpace(n)) set.DisplayName = n;
         }
         if (File.Exists(System.IO.Path.Combine(dir, ".steam-extract")))
             set.Source = "Steam 提取";

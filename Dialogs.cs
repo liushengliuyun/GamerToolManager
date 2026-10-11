@@ -1115,14 +1115,14 @@ internal class CollectorDialog : Form
             return;
         }
         PersistDir();
-        var sets = Collector.ScanCollectionDir(dir);
+        var sets = Collector.ScanCollectionDir(dir, store);
         grid.Rows.Clear();
         foreach (var s in sets)
         {
             int i = grid.Rows.Add(
                 false, // 默认不勾选，勾谁传谁
                 s.Recognized ? s.AppId.ToString() : "—",
-                s.DisplayName,
+                string.IsNullOrEmpty(s.DisplayName) ? "—" : s.DisplayName,
                 string.IsNullOrEmpty(s.Source) ? "—" : s.Source,
                 s.Manifests.Count.ToString(),
                 s.VdfLocal != null ? "✓" : "—",
