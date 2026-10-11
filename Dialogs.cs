@@ -579,63 +579,144 @@ internal class TutorialDialog : Form
     }
 }
 
-// ---------------- 游戏选择器（搜索到多个匹配时） ----------------
+// ---------------- 游戏选择器（搜索到多个匹配 / 已拥有列表；支持本地过滤 + Steam 名称搜索） ----------------
 internal class GameChooser : Form
 {
     public long PickId;
     public string PickName;
+    private readonly Store store;   // 可空：提供后支持按名字联网搜索（回车触发）
+    private readonly List<(long id, string name)> games;
+    private List<(long id, string name)> filtered = new();
     private readonly ListBox list = new();
+    private readonly TextBox txtFilter = new();
+    private readonly Label lblCaption;
 
-    public GameChooser(List<(long id, string name)> games)
+    public GameChooser(List<(long id, string name)> games, string caption = null, Store store = null)
     {
+        this.games = games;
+        this.store = store;
         Text = "选择游戏";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MinimizeBox = false; MaximizeBox = false;
-        ClientSize = new Size(480, 380);
+        ClientSize = new Size(520, 620);
         BackColor = Theme.Back;
         ForeColor = Theme.Text;
         Font = new Font("Microsoft YaHei UI", 9.5f);
 
-        var lbl = new Label
+        // 顶部说明 + 过滤框（AutoSize，任何 DPI 不裁字）
+        var top = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 32,
-            Text = " 搜索到多个匹配，请选择：",
-            ForeColor = Theme.Sub,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             BackColor = Theme.Panel,
-            Padding = new Padding(8, 8, 0, 0),
+            Padding = new Padding(8, 8, 8, 4),
         };
+        lblCaption = new Label
+        {
+            Text = caption ?? " 搜索到多个匹配，请选择：",
+            AutoSize = true,
+            ForeColor = Theme.Sub,
+            Margin = new Padding(0, 9, 10, 0),
+        };
+        txtFilter.Width = 220;
+        txtFilter.PlaceholderText = "过滤 AppID；输名字按回车联网搜";
+        txtFilter.BackColor = Theme.Input; txtFilter.ForeColor = Theme.Text; txtFilter.BorderStyle = BorderStyle.FixedSingle;
+        txtFilter.Margin = new Padding(0, 4, 0, 0);
+        txtFilter.TextChanged += (_, _) => ApplyFilter();
+        txtFilter.KeyDown += async (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                await SearchSteamAsync();
+            }
+        };
+        top.Controls.Add(lblCaption);
+        top.Controls.Add(txtFilter);
+
         list.Dock = DockStyle.Fill;
         list.BackColor = Color.FromArgb(18, 20, 26);
         list.ForeColor = Theme.Text;
         list.BorderStyle = BorderStyle.None;
-        foreach (var g in games)
-            list.Items.Add(g.id + "  —  " + g.name);
-        if (list.Items.Count > 0) list.SelectedIndex = 0;
-        list.DoubleClick += (_, _) => { if (list.SelectedIndex >= 0) { Accept(); } };
+        list.DoubleClick += (_, _) => Accept();
 
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, BackColor = Theme.Panel, Padding = new Padding(0, 7, 12, 7) };
-        var btnOk = new Button { Text = "确定", Width = 88, Height = 28 };
-        var btnNo = new Button { Text = "取消", Width = 88, Height = 28, Margin = new Padding(0, 0, 8, 0) };
+        var flow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            FlowDirection = FlowDirection.RightToLeft,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            BackColor = Theme.Panel,
+            Padding = new Padding(0, 6, 12, 6),
+        };
+        var btnOk = new Button { Text = "确定", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 30), Padding = new Padding(8, 0, 8, 0) };
+        var btnNo = new Button { Text = "取消", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 30), Padding = new Padding(8, 0, 8, 0), Margin = new Padding(0, 0, 8, 0) };
         UiHelper.Style(btnOk, true); UiHelper.Style(btnNo);
         btnOk.Click += (_, _) => Accept();
         btnNo.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
         flow.Controls.Add(btnNo); flow.Controls.Add(btnOk);
 
         Controls.Add(list);
-        Controls.Add(lbl);
+        Controls.Add(top);
         Controls.Add(flow);
 
-        void Accept()
+        ApplyFilter();
+        lblCaption.Text = (caption ?? " 搜索到多个匹配，请选择：") + $"（共 {filtered.Count} 项）";
+    }
+
+    private void ApplyFilter()
+    {
+        string q = txtFilter.Text.Trim();
+        filtered = q.Length == 0 ? games :
+            games.Where(g =>
+                g.id.ToString().Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                (g.name ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        Render();
+    }
+
+    /// <summary>按名字走 Steam 商店搜索，与已拥有列表取交集（已下架游戏搜不到，用 AppID 过滤）。</summary>
+    private async Task SearchSteamAsync()
+    {
+        string q = txtFilter.Text.Trim();
+        if (q.Length == 0 || store == null || long.TryParse(q, out _)) return;
+        try
         {
-            if (list.SelectedIndex < 0) return;
-            var g = games[list.SelectedIndex];
-            PickId = g.id;
-            PickName = g.name;
-            DialogResult = DialogResult.OK;
-            Close();
+            lblCaption.Text = " 正在搜索 Steam 商店…";
+            var hits = await Store.NativePuller.SearchGamesAsync(q, store.ProxyEff);
+            foreach (var h in hits)
+                if (games.Any(g => g.id == h.id) && !filtered.Any(c => c.id == h.id))
+                    filtered.Insert(0, (h.id, h.name));
+            lblCaption.Text = $" 共 {filtered.Count} 项（含 Steam 搜索结果）";
+            Render();
         }
+        catch
+        {
+            lblCaption.Text = " Steam 搜索失败（可检查代理），改用 AppID 过滤";
+        }
+    }
+
+    private void Render()
+    {
+        list.BeginUpdate();
+        list.Items.Clear();
+        foreach (var g in filtered)
+            list.Items.Add(g.id + "  —  " + g.name);
+        if (list.Items.Count > 0) list.SelectedIndex = 0;
+        list.EndUpdate();
+    }
+
+    private void Accept()
+    {
+        if (list.SelectedIndex < 0 || list.SelectedIndex >= filtered.Count) return;
+        PickId = filtered[list.SelectedIndex].id;
+        PickName = filtered[list.SelectedIndex].name;
+        DialogResult = DialogResult.OK;
+        Close();
     }
 }
 
@@ -1242,11 +1323,10 @@ internal class CollectorDialog : Form
         {
             var owned = await extractor.GetOwnedAppsAsync(CancellationToken.None, ExtractLog());
             var games = owned.OrderBy(id => id)
-                .Take(500)
                 .Select(id => ((long)id, store.Records.TryGetValue(id, out var r) ? (r.Name ?? r.FetchedName) ?? "(未登记名)" : "(未登记名)"))
                 .ToList();
             if (games.Count == 0) { AppendLog("已拥有列表为空。", Theme.Yellow); return; }
-            using var chooser = new GameChooser(games);
+            using var chooser = new GameChooser(games, $"选择要提取的游戏：", store);
             if (chooser.ShowDialog(this) == DialogResult.OK)
                 await RunExtractAsync(chooser.PickId);
         }
