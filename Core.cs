@@ -63,6 +63,84 @@ public class Settings
     }
 }
 
+// ---------------- 代理探活与端口漂移自愈 ----------------
+public partial class Store
+{
+    private readonly object proxyGate = new();
+    private string validatedProxy;
+    private DateTime validatedAt = DateTime.MinValue;
+
+    /// <summary>代理状态变化通知（UI 订阅后写日志）。</summary>
+    public static event Action<string> ProxyNotice;
+
+    /// <summary>
+    /// 实际可用的代理（5 分钟缓存）：配置代理探活失败则自动探测常见本地端口
+    /// （FlClash/Clash 端口漂移），找到即切换并写回设置；全不可用则返回空串跳过代理直连，
+    /// 不再出现“目标计算机积极拒绝”这类误导性报错。
+    /// </summary>
+    public string ProxyEff
+    {
+        get
+        {
+            string cfg = S.NameProxy?.Trim() ?? "";
+            if (cfg.Length == 0) return "";
+            lock (proxyGate)
+            {
+                if (validatedProxy != null && (DateTime.Now - validatedAt).TotalMinutes < 5)
+                    return validatedProxy;
+
+                string found = ProbeProxy(cfg);
+                if (found != cfg)
+                {
+                    ProxyNotice?.Invoke(found == ""
+                        ? $"⚠ 代理 {cfg} 无响应，常见端口也没有活代理 —— 本次跳过代理直连（可在设置里修改）。"
+                        : $"✓ 代理端口漂移: {cfg} → {found}，已自动切换并保存。");
+                    validatedProxy = found;
+                    if (found != "")
+                    {
+                        S.NameProxy = found;
+                        SaveSettings();
+                    }
+                }
+                else
+                {
+                    validatedProxy = cfg;
+                }
+                validatedAt = DateTime.Now;
+                return validatedProxy;
+            }
+        }
+    }
+
+    /// <summary>先探配置端口，失败再扫常见本地代理端口；都没有返回空串。</summary>
+    private static string ProbeProxy(string configured)
+    {
+        if (ProbeTcp(configured)) return configured;
+        string host = "127.0.0.1";
+        int[] ports = { 7890, 7891, 7892, 7893, 7897, 7899, 2080, 10808, 10809, 1080, 8080, 8888 };
+        foreach (int p in ports)
+        {
+            var cand = $"http://{host}:{p}";
+            if (cand.Equals(configured, StringComparison.OrdinalIgnoreCase)) continue;
+            if (ProbeTcp(cand)) return cand;
+        }
+        return "";
+    }
+
+    private static bool ProbeTcp(string proxyUrl)
+    {
+        try
+        {
+            var uri = new Uri(proxyUrl);
+            using var c = new System.Net.Sockets.TcpClient();
+            var connect = c.ConnectAsync(uri.Host, uri.Port);
+            if (!connect.Wait(400)) return false;
+            return c.Connected;
+        }
+        catch { return false; }
+    }
+}
+
 // ---------------- 持久化的游戏备注记录 ----------------
 public class GameRecord
 {
@@ -297,7 +375,7 @@ internal static class MiniSql
 }
 
 // ---------------- 数据与操作中枢 ----------------
-public class Store
+public partial class Store
 {
     public Settings S = new();
     public Dictionary<long, GameRecord> Records = new();
@@ -655,6 +733,7 @@ public class Store
 
         static readonly HttpClient Http = CreateClient(null);
         static HttpClient httpProxy;
+        static string httpProxyKey;
 
         static HttpClient CreateClient(string proxy)
         {
@@ -670,7 +749,16 @@ public class Store
             return c;
         }
 
-        static HttpClient Px(string proxy) => httpProxy ??= CreateClient(proxy);
+        static HttpClient Px(string proxy)
+        {
+            // 代理地址可能经 ProxyEff 漂移切换，按地址缓存而不是只缓存首个
+            if (httpProxy == null || httpProxyKey != proxy)
+            {
+                httpProxy = CreateClient(proxy);
+                httpProxyKey = proxy;
+            }
+            return httpProxy;
+        }
 
         /// <summary>直连优先，失败走代理。</summary>
         static async Task<string> GetStringSmart(string url, string proxy)
@@ -1070,16 +1158,21 @@ public class Store
     { AutomaticDecompression = DecompressionMethods.All }) { Timeout = TimeSpan.FromSeconds(6) };
 
     private static HttpClient hcProxy;
+    private static string hcProxyKey;
 
     private static HttpClient ProxyClient(string proxy)
     {
-        if (hcProxy == null)
+        // 地址可能经 ProxyEff 漂移切换，按地址缓存
+        if (hcProxy == null || hcProxyKey != proxy)
+        {
             hcProxy = new HttpClient(new HttpClientHandler
             {
                 Proxy = new WebProxy(proxy),
                 UseProxy = true,
                 AutomaticDecompression = DecompressionMethods.All,
             }) { Timeout = TimeSpan.FromSeconds(8) };
+            hcProxyKey = proxy;
+        }
         return hcProxy;
     }
 

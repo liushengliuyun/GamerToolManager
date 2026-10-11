@@ -20,7 +20,7 @@ internal static class Program
             string dest = Path.Combine(Path.GetTempPath(), "gtm_pulltest");
             Directory.CreateDirectory(dest);
             Console.WriteLine("== pulltest appid=" + appid + " dest=" + dest);
-            var res = Store.NativePuller.PullAsync(appid, null, dest, store.S.NameProxy,
+            var res = Store.NativePuller.PullAsync(appid, null, dest, store.ProxyEff,
                 (t, _) => Console.WriteLine("  " + t), CancellationToken.None).GetAwaiter().GetResult();
             if (res == null)
             {
