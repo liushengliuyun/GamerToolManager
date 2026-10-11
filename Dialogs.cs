@@ -651,8 +651,8 @@ internal class CollectorDialog : Form
     private readonly Button btnOwned = new() { Text = "从已拥有列表选" };
     private readonly Button btnSteam = new() { Text = "登录 Steam" };
 
-    // Steam 登录小组（未登录时显示）
-    private readonly GroupBox grpLogin = new();
+    // Steam 登录行（未登录且需要登录时显示；不用 GroupBox，避免 AutoSize 裁切）
+    private readonly FlowLayoutPanel rowLogin = new();
     private readonly TextBox txtUser = new();
     private readonly TextBox txtPass = new();
     private readonly Button btnDoLogin = new() { Text = "登录" };
@@ -676,6 +676,10 @@ internal class CollectorDialog : Form
         ForeColor = Theme.Text;
         Font = new Font("Microsoft YaHei UI", 9.5f);
 
+        // 恢复记忆的窗口大小
+        if (store.S.CollectWinW >= MinimumSize.Width && store.S.CollectWinH >= MinimumSize.Height)
+            Size = new Size(store.S.CollectWinW, store.S.CollectWinH);
+
         BuildUi();
 
         txtDir.Text = store.S.CollectDirEff;
@@ -684,6 +688,9 @@ internal class CollectorDialog : Form
         extractor.StateChanged += OnSteamStateChanged;
         FormClosing += (_, _) =>
         {
+            store.S.CollectWinW = Width;
+            store.S.CollectWinH = Height;
+            store.SaveSettings();
             cts?.Cancel();
             extractor.StateChanged -= OnSteamStateChanged;
         };
@@ -731,10 +738,7 @@ internal class CollectorDialog : Form
         AutoSizeBtn(btnScan, true);
         btnScan.Margin = new Padding(0, 3, 10, 0);
         btnScan.Click += (_, _) => ScanDir();
-        lblTokenHint.AutoSize = true;
-        lblTokenHint.ForeColor = Theme.Sub;
-        lblTokenHint.Margin = new Padding(0, 11, 0, 0);
-        row1.Controls.AddRange(new Control[] { lblDir, txtDir, btnBrowse, btnScan, lblTokenHint });
+        row1.Controls.AddRange(new Control[] { lblDir, txtDir, btnBrowse, btnScan });
 
         lblSteam.AutoSize = true;
         lblSteam.ForeColor = Theme.Sub;
@@ -750,34 +754,38 @@ internal class CollectorDialog : Form
         btnOwned.Click += async (_, _) => await ChooseOwnedAsync();
         row2.Controls.AddRange(new Control[] { lblSteam, btnSteam, btnExtract, btnOwned });
 
-        // Steam 登录小组（未登录且点「登录 Steam」时展开；内容自适应 DPI）
-        grpLogin.Text = "Steam 登录（凭据只在本机换取 refresh token，密码不留存）";
-        grpLogin.ForeColor = Theme.Sub;
-        grpLogin.BackColor = Theme.Panel;
-        grpLogin.AutoSize = true;
-        grpLogin.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        grpLogin.Padding = new Padding(8, 2, 8, 6);
-        grpLogin.Margin = new Padding(0, 4, 0, 0);
-        grpLogin.Visible = false;
-        var loginFlow = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0) };
+        // Steam 登录行（未登录且点「登录 Steam」/需要登录时展开）
+        rowLogin.FlowDirection = FlowDirection.LeftToRight;
+        rowLogin.WrapContents = false;
+        rowLogin.AutoSize = true;
+        rowLogin.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        rowLogin.Margin = new Padding(14, 2, 0, 0);
+        rowLogin.Visible = false;
+        var lblLoginTag = new Label { Text = "登录:", AutoSize = true, ForeColor = Theme.Sub, Margin = new Padding(0, 10, 8, 0) };
         txtUser.Width = 180;
         txtUser.PlaceholderText = "账号";
         StyleBox(txtUser);
-        txtUser.Margin = new Padding(0, 3, 8, 3);
+        txtUser.Margin = new Padding(0, 6, 8, 0);
         txtPass.Width = 180;
         txtPass.PlaceholderText = "密码";
         txtPass.PasswordChar = '●';
         StyleBox(txtPass);
-        txtPass.Margin = new Padding(0, 3, 8, 3);
+        txtPass.Margin = new Padding(0, 6, 8, 0);
         AutoSizeBtn(btnDoLogin, true);
-        btnDoLogin.Margin = new Padding(0, 3, 0, 3);
+        btnDoLogin.Margin = new Padding(0, 3, 8, 0);
         btnDoLogin.Click += async (_, _) => await LoginAsync();
-        loginFlow.Controls.AddRange(new Control[] { txtUser, txtPass, btnDoLogin });
-        grpLogin.Controls.Add(loginFlow);
+        var lblLoginNote = new Label { Text = "凭据只存本机，密码不留存", AutoSize = true, ForeColor = Theme.Sub, Margin = new Padding(0, 10, 0, 0) };
+        rowLogin.Controls.AddRange(new Control[] { lblLoginTag, txtUser, txtPass, btnDoLogin, lblLoginNote });
+
+        // 令牌提示独立成行，避免挤在目录行右侧溢出
+        lblTokenHint.AutoSize = true;
+        lblTokenHint.ForeColor = Theme.Sub;
+        lblTokenHint.Margin = new Padding(14, 4, 0, 0);
 
         top.Controls.Add(row1);
         top.Controls.Add(row2);
-        top.Controls.Add(grpLogin);
+        top.Controls.Add(lblTokenHint);
+        top.Controls.Add(rowLogin);
 
         // ---------- 网格 ----------
         grid.Dock = DockStyle.Fill;
@@ -893,7 +901,7 @@ internal class CollectorDialog : Form
         lblSteam.Text = logged ? "Steam: 已登录 " + extractor.Account : "Steam: 未登录";
         lblSteam.ForeColor = logged ? Theme.Green : Theme.Sub;
         btnSteam.Text = logged ? "切换账号" : "登录 Steam";
-        grpLogin.Visible = !logged && grpLogin.Tag as string == "open";
+        rowLogin.Visible = !logged && rowLogin.Tag as string == "open";
         if (string.IsNullOrWhiteSpace(txtUser.Text))
             txtUser.Text = SteamAuthStore.Load()?.Account ?? "";
         txtPass.Clear();
@@ -907,12 +915,12 @@ internal class CollectorDialog : Form
                     "切换账号", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                 return;
             extractor.Logout();
-            grpLogin.Tag = "open";
+            rowLogin.Tag = "open";
             UpdateSteamUi();
             AppendLog("已退出 Steam 登录。", Theme.Yellow);
             return;
         }
-        grpLogin.Tag = grpLogin.Visible ? null : "open";
+        rowLogin.Tag = rowLogin.Visible ? null : "open";
         UpdateSteamUi();
     }
 
@@ -1176,7 +1184,7 @@ internal class CollectorDialog : Form
         }
         catch (NeedsLoginException)
         {
-            grpLogin.Tag = "open";
+            rowLogin.Tag = "open";
             UpdateSteamUi();
             AppendLog("⚠ 需要先登录 Steam（在上方输入账号密码）。", Theme.Yellow);
         }
@@ -1220,7 +1228,7 @@ internal class CollectorDialog : Form
         }
         catch (NeedsLoginException)
         {
-            grpLogin.Tag = "open";
+            rowLogin.Tag = "open";
             UpdateSteamUi();
             AppendLog("⚠ 需要先登录 Steam（在上方输入账号密码）。", Theme.Yellow);
         }

@@ -40,6 +40,8 @@ public class Settings
     public bool PassProxyToTool { get; set; } = false;  // (保留兼容)
     public bool AutoFetchNames { get; set; } = true;    // 启动时后台抓取缺失游戏名
     public string CollectDir { get; set; } = "";        // 清单收集目录；留空 = GamerToolDir
+    public int CollectWinW { get; set; } = 0;           // 清单收集窗口宽高记忆（0 = 默认）
+    public int CollectWinH { get; set; } = 0;
 
     // ----- 窗口布局记忆 -----
     public int WinW { get; set; } = 0;      // 0 = 未记忆，用默认
