@@ -905,6 +905,12 @@ public partial class Store
                         fileRef = sha;
                         via = "api.github";
                     }
+                    catch (HttpRequestException hex) when (hex.Message.Contains("404"))
+                    {
+                        // api.github 对不存在的分支返回 404 —— 属正常轮换，不是故障
+                        log($"该仓库没有 {appid} 分支，换下一个。", LogKind.Tool);
+                        continue;
+                    }
                     catch (Exception ex)
                     {
                         log($"⚠ 访问 {repo} 失败: {ex.Message}", LogKind.Warn);
