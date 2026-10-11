@@ -579,22 +579,22 @@ internal class TutorialDialog : Form
     }
 }
 
-// ---------------- 游戏选择器（搜索到多个匹配 / 已拥有列表；支持本地过滤 + Steam 名称搜索） ----------------
+// ---------------- 游戏选择器（本地过滤：AppID / 粘贴或拖入商店链接） ----------------
 internal class GameChooser : Form
 {
     public long PickId;
     public string PickName;
-    private readonly Store store;   // 可空：提供后支持按名字联网搜索（回车触发）
     private readonly List<(long id, string name)> games;
     private List<(long id, string name)> filtered = new();
     private readonly ListBox list = new();
     private readonly TextBox txtFilter = new();
     private readonly Label lblCaption;
+    private readonly string baseCaption;
 
-    public GameChooser(List<(long id, string name)> games, string caption = null, Store store = null)
+    public GameChooser(List<(long id, string name)> games, string caption = null)
     {
         this.games = games;
-        this.store = store;
+        baseCaption = caption ?? " 搜索到多个匹配，请选择：";
         Text = "选择游戏";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -617,24 +617,16 @@ internal class GameChooser : Form
         };
         lblCaption = new Label
         {
-            Text = caption ?? " 搜索到多个匹配，请选择：",
+            Text = baseCaption,
             AutoSize = true,
             ForeColor = Theme.Sub,
             Margin = new Padding(0, 2, 0, 2),
         };
         txtFilter.Width = 320;
-        txtFilter.PlaceholderText = "过滤 AppID；输游戏名按回车联网搜";
+        txtFilter.PlaceholderText = "AppID / 粘贴商店链接，或直接拖入";
         txtFilter.BackColor = Theme.Input; txtFilter.ForeColor = Theme.Text; txtFilter.BorderStyle = BorderStyle.FixedSingle;
         txtFilter.Margin = new Padding(0, 4, 0, 2);
         txtFilter.TextChanged += (_, _) => ApplyFilter();
-        txtFilter.KeyDown += async (_, e) =>
-        {
-            if (e.KeyCode == Keys.Enter)
-            {
-                e.SuppressKeyPress = true;
-                await SearchSteamAsync();
-            }
-        };
         top.Controls.Add(lblCaption);
         top.Controls.Add(txtFilter);
 
@@ -665,39 +657,82 @@ internal class GameChooser : Form
         Controls.Add(top);
         Controls.Add(flow);
 
+        // 拖入商店链接 / [appid] 文件夹 → 提取 AppID 过滤
+        AllowDrop = true;
+        list.AllowDrop = true;
+        txtFilter.AllowDrop = true;
+        DragEnter += DragEntry;
+        list.DragEnter += DragEntry;
+        txtFilter.DragEnter += DragEntry;
+        DragDrop += DropEntry;
+        list.DragDrop += DropEntry;
+        txtFilter.DragDrop += DropEntry;
+
         ApplyFilter();
-        lblCaption.Text = (caption ?? " 搜索到多个匹配，请选择：") + $"（共 {filtered.Count} 项）";
+        lblCaption.Text = baseCaption + $"（共 {filtered.Count} 项）";
+    }
+
+    void DragEntry(object _, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.Text) || e.Data.GetDataPresent(DataFormats.FileDrop))
+            e.Effect = DragDropEffects.Copy;
+    }
+
+    void DropEntry(object _, DragEventArgs e)
+    {
+        try
+        {
+            long? id = null;
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                var files = (string[])e.Data.GetData(DataFormats.FileDrop);
+                if (files is { Length: > 0 }) id = Store.ExtractAppIdFromPath(files[0]);
+            }
+            if (id == null)
+            {
+                string t = e.Data.GetData(DataFormats.Text) as string
+                           ?? e.Data.GetData(DataFormats.StringFormat) as string;
+                id = Store.ExtractAppId(t);
+            }
+            if (id != null)
+            {
+                txtFilter.Text = id.ToString();   // 触发 ApplyFilter
+                Activate();
+            }
+        }
+        catch { }
     }
 
     private void ApplyFilter()
     {
         string q = txtFilter.Text.Trim();
-        filtered = q.Length == 0 ? games :
-            games.Where(g =>
-                g.id.ToString().Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                (g.name ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
-        Render();
-    }
+        if (q.Length == 0)
+        {
+            filtered = games;
+            lblCaption.Text = baseCaption + $"（共 {filtered.Count} 项）";
+            lblCaption.ForeColor = Theme.Sub;
+        }
+        else
+        {
+            long? linkId = Store.ExtractAppId(q);   // 支持商店链接 / steam:// / 纯 AppID
+            filtered = linkId != null
+                ? games.Where(g => g.id == linkId.Value).ToList()
+                : games.Where(g =>
+                    g.id.ToString().Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    (g.name ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
 
-    /// <summary>按名字走 Steam 商店搜索，与已拥有列表取交集（已下架游戏搜不到，用 AppID 过滤）。</summary>
-    private async Task SearchSteamAsync()
-    {
-        string q = txtFilter.Text.Trim();
-        if (q.Length == 0 || store == null || long.TryParse(q, out _)) return;
-        try
-        {
-            lblCaption.Text = " 正在搜索 Steam 商店…";
-            var hits = await Store.NativePuller.SearchGamesAsync(q, store.ProxyEff);
-            foreach (var h in hits)
-                if (games.Any(g => g.id == h.id) && !filtered.Any(c => c.id == h.id))
-                    filtered.Insert(0, (h.id, h.name));
-            lblCaption.Text = $" 共 {filtered.Count} 项（含 Steam 搜索结果）";
-            Render();
+            if (linkId != null && filtered.Count == 0)
+            {
+                lblCaption.Text = $" {linkId} 不在你拥有的列表里（家庭共享/未入库的游戏无法提取）";
+                lblCaption.ForeColor = Theme.Red;
+            }
+            else
+            {
+                lblCaption.Text = baseCaption + $"（匹配 {filtered.Count} 项）";
+                lblCaption.ForeColor = Theme.Sub;
+            }
         }
-        catch
-        {
-            lblCaption.Text = " Steam 搜索失败（可检查代理），改用 AppID 过滤";
-        }
+        Render();
     }
 
     private void Render()
@@ -1327,7 +1362,7 @@ internal class CollectorDialog : Form
                 .Select(id => ((long)id, store.Records.TryGetValue(id, out var r) ? (r.Name ?? r.FetchedName) ?? "(未登记名)" : "(未登记名)"))
                 .ToList();
             if (games.Count == 0) { AppendLog("已拥有列表为空。", Theme.Yellow); return; }
-            using var chooser = new GameChooser(games, "选择要提取的游戏（输名字按回车搜索）：", store);
+            using var chooser = new GameChooser(games, "选择要提取的游戏（粘贴/拖入商店链接，或输 AppID）：");
             if (chooser.ShowDialog(this) == DialogResult.OK)
             {
                 // 搜到的名字记进 games.json，下次本地过滤直接命中
