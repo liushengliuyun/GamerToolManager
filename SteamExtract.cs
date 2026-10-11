@@ -320,7 +320,8 @@ internal sealed class SteamExtractor : IDisposable
 
         log?.Invoke("正在获取已拥有游戏列表（PICS 包信息）…", LogKind.Tool);
         var requests = packageIds.Select(id => new SteamApps.PICSRequest(id)).ToList();
-        var rs = await steamApps.PICSGetProductInfo(null, requests, false);
+        // SteamKit 批量重载要求两个列表均非 null（空列表合法 = 该类不请求）
+        var rs = await steamApps.PICSGetProductInfo(new List<SteamApps.PICSRequest>(), requests, false);
         if (rs.Failed) throw new InvalidOperationException("获取已拥有游戏列表失败（Steam 网络异常），请重试。");
 
         var set = new HashSet<uint>();
