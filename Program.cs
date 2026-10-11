@@ -204,6 +204,8 @@ internal static class SelfTest
             check("BuildLuaText 生成解锁脚本",
                   lua.StartsWith("addappid(460900)") && lua.Contains("setManifestid(460901,\"2896417252875612038\",0)"));
 
+            PackTest.Run(check);
+
             string scanRoot = Path.Combine(Path.GetTempPath(), "gtm_scan_" + Guid.NewGuid().ToString("N")[..8]);
             Directory.CreateDirectory(Path.Combine(scanRoot, "[460900]SampleGame"));
             File.WriteAllText(Path.Combine(scanRoot, "[460900]SampleGame", "460900.lua"), "addappid(460900)");

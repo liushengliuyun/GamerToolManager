@@ -8,6 +8,7 @@ public class MainForm : Form
     private List<GameEntry> entries = new();
     private bool building;
     private bool fetchingNames;
+    private bool busyPack; // 导入清单包进行中（防止重复触发）
     private int regSort; // 0=默认(已部署优先) 1=注册时间最新在上 2=最旧在上（启动时从设置恢复）
 
     // 控件
@@ -25,7 +26,7 @@ public class MainForm : Form
     private readonly Label lblBig = new();
     private readonly Label lblInfo = new();
     private readonly Label lblHint = new();
-    private Button btnOpenFolder, btnDeploy, btnRestore, btnLocate, btnDelLua, btnDelFolder, btnRename, btnFetch, btnRePull, btnUploadCollect, btnReExtract;
+    private Button btnOpenFolder, btnDeploy, btnRestore, btnLocate, btnDelLua, btnDelFolder, btnRename, btnFetch, btnRePull, btnUploadCollect, btnReExtract, btnExportPack;
 
     public MainForm()
     {
@@ -185,6 +186,20 @@ public class MainForm : Form
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(i1);
             menu.Items.Add(i2);
+            menu.Items.Add(new ToolStripSeparator());
+            var i3 = new ToolStripMenuItem("导入清单文件… —— 把别人分享的 .gtm 清单包导入（也可直接拖进主窗口）")
+            { ForeColor = Theme.Text, BackColor = Theme.Panel };
+            i3.Click += async (s3, e3) =>
+            {
+                using var ofd = new OpenFileDialog
+                {
+                    Title = "选择清单包文件",
+                    Filter = "GamerTool 清单包 (*.gtm)|*.gtm|所有文件 (*.*)|*.*",
+                };
+                if (ofd.ShowDialog(this) == DialogResult.OK)
+                    await ImportPackAsync(ofd.FileName);
+            };
+            menu.Items.Add(i3);
             menu.Show((Control)s, new Point(0, ((Control)s).Height));
         };
 
@@ -220,26 +235,27 @@ public class MainForm : Form
         btnPullGo = new Button { Text = "开始拉取", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 32), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 0, 0) };
         UiHelper.Style(btnPullGo, true);
         btnPullGo.Click += async (_, _) => await PullFromMainAsync();
-        var btnExtractGo = new Button { Text = "提取", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 32), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 10, 0) };
-        UiHelper.Style(btnExtractGo);
-        btnExtractGo.Click += async (_, _) =>
-        {
-            var input = txtPull.Text.Trim();
-            if (input.Length == 0)
-            {
-                MessageBox.Show(this, "请输入 AppID 或粘贴商店链接（提取需已登录 Steam）。", "提取", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            await ExtractFromMainAsync(input);
-        };
         txtPull.KeyDown += async (_, e) =>
         {
             if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await PullFromMainAsync(); }
         };
+        // 导入清单包：主界面一级入口（拉取 | 导入清单）
+        var btnImportGo = new Button { Text = "导入清单", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 32), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 10, 0) };
+        UiHelper.Style(btnImportGo);
+        btnImportGo.Click += async (_, _) =>
+        {
+            using var ofd = new OpenFileDialog
+            {
+                Title = "选择清单包文件",
+                Filter = "GamerTool 清单包 (*.gtm)|*.gtm|所有文件 (*.*)|*.*",
+            };
+            if (ofd.ShowDialog(this) == DialogResult.OK)
+                await ImportPackAsync(ofd.FileName);
+        };
         pullFlow.Controls.Add(lblPull);
         pullFlow.Controls.Add(txtPull);
         pullFlow.Controls.Add(btnPullGo);
-        pullFlow.Controls.Add(btnExtractGo);
+        pullFlow.Controls.Add(btnImportGo);
         pullBar.Controls.Add(pullFlow);
 
         // ---------- 主区 ----------
@@ -392,6 +408,7 @@ public class MainForm : Form
         ActBtn("重新拉取清单", ref btnRePull, async (_, _) => await RePullSelectedAsync());
         ActBtn("重新从 Steam 提取", ref btnReExtract, async (_, _) => await ReExtractSelectedAsync());
         ActBtn("上传到收集库", ref btnUploadCollect, async (_, _) => await UploadSelectedToCollectAsync());
+        ActBtn("导出清单文件", ref btnExportPack, async (_, _) => await ExportPackAsync());
         ActBtn("还原未破解", ref btnRestore, async (_, _) => await RestoreSelectedAsync(), danger: true);
         ActBtn("定位已部署 Lua", ref btnLocate, (_, _) => LocateDeployed());
         ActBtn("删除 Lua 文件", ref btnDelLua, (_, _) => DeleteSourceLua(), danger: true);
@@ -451,6 +468,17 @@ public class MainForm : Form
         };
         DragDrop += (_, e) =>
         {
+            // .gtm 清单包优先识别：拖入即导入（在 AppID 解析之前）
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                var files = (string[])e.Data.GetData(DataFormats.FileDrop);
+                if (files is { Length: > 0 } && files[0].EndsWith(ManifestPack.Ext, StringComparison.OrdinalIgnoreCase))
+                {
+                    Log("拖入清单包: " + files[0], LogKind.Info);
+                    _ = ImportPackAsync(files[0]);
+                    return;
+                }
+            }
             long? id = null;
             try
             {
@@ -576,6 +604,7 @@ public class MainForm : Form
         btnRePull.Enabled = any && e.FolderExists && !AppBusy(e.AppId);
         btnReExtract.Enabled = any && e.FolderExists && !AppBusy(e.AppId);
         btnUploadCollect.Enabled = any && e.FolderExists && (e.SourceLuaExists || e.LocalManifests.Count > 0);
+        btnExportPack.Enabled = SelectedMany().Any(s => s.FolderExists && (s.LocalManifests.Count > 0 || s.SourceLuaExists));
         btnRestore.Enabled = any && (e.Deployed || (store.SteamDirEff != "" && store.RegisteredDbIds(e).Count > 0));
         btnLocate.Enabled = any && e.Deployed;
         btnDelLua.Enabled = any && e.SourceLuaExists;
@@ -1195,54 +1224,6 @@ public class MainForm : Form
         RefreshAll();
     }
 
-    /// <summary>主界面快捷提取：输入 AppID / 链接 / 游戏名，直接从 Steam 提取。</summary>
-    private async Task ExtractFromMainAsync(string input)
-    {
-        long appid;
-        var linkId = Store.ExtractAppId(input);
-        if (linkId != null) appid = linkId.Value;
-        else if (long.TryParse(input, out appid) && input.Length >= 4) { }
-        else
-        {
-            Log("搜索 Steam 商店: " + input, LogKind.Info);
-            List<(long id, string name)> matches;
-            try { matches = await Store.NativePuller.SearchGamesAsync(input, store.ProxyEff); }
-            catch (Exception ex) { Log("✕ 搜索失败: " + ex.Message, LogKind.Err); return; }
-            if (matches.Count == 0) { Log("✕ 未搜索到匹配的游戏（可尝试英文名或直接输 AppID）。", LogKind.Warn); return; }
-            if (matches.Count == 1) { appid = matches[0].id; }
-            else
-            {
-                using var chooser = new GameChooser(matches.Take(15).ToList());
-                if (chooser.ShowDialog(this) != DialogResult.OK) return;
-                appid = chooser.PickId;
-            }
-        }
-
-        if (AppBusy(appid)) { Log(appid + " 正在处理中，不重复发起。", LogKind.Warn); return; }
-        PullBegin(appid);
-        try
-        {
-            Log($"== 从 Steam 提取 {appid} 的最新清单…", LogKind.Info);
-            var r = await SteamExtractor.Default.ExtractAsync(appid, store.S.GamerToolDir, CancellationToken.None, (t, k) => Log(t, k));
-            Log($"✓ 提取完成: {r.Dir}" + (r.FailedDepots.Count > 0 ? $"（⚠ {r.FailedDepots.Count} 个 depot 失败）" : "") +
-                " —— 可直接部署或【上传到收集库】。", r.FailedDepots.Count > 0 ? LogKind.Warn : LogKind.Ok);
-            txtPull.Text = appid.ToString();
-        }
-        catch (NeedsLoginException)
-        {
-            Log("⚠ 尚未登录 Steam —— 打开【清单收集】登录一次即可（之后免登录）。", LogKind.Warn);
-        }
-        catch (Exception ex)
-        {
-            Log("✕ 提取失败: " + ex.Message, LogKind.Err);
-        }
-        finally
-        {
-            PullEnd(appid);
-            RefreshAll();
-        }
-    }
-
     /// <summary>重新从 Steam 提取选中游戏的最新清单（写回原文件夹，相当于提取版的重新拉取）。</summary>
     private async Task ReExtractSelectedAsync()
     {
@@ -1346,6 +1327,123 @@ public class MainForm : Form
         {
             btnUploadCollect.Enabled = true;
             UpdateDetails();
+        }
+    }
+
+    /// <summary>把选中游戏（支持多选）的本地清单打包导出成一个 .gtm 清单包文件。</summary>
+    private async Task ExportPackAsync()
+    {
+        var targets = SelectedMany().Where(e => e.FolderExists && (e.LocalManifests.Count > 0 || e.SourceLuaExists)).ToList();
+        if (targets.Count == 0)
+        {
+            MessageBox.Show(this, "选中的游戏没有可导出的本地清单。\n需要清单文件夹里至少有 清单 / Key.vdf / 解锁 Lua 之一。",
+                "导出清单文件", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        var preview = string.Join("\n", targets.Take(8).Select(e => "• " + e.DisplayName + "  (" + e.AppId + ")"));
+        if (targets.Count > 8) preview += $"\n• …等共 {targets.Count} 个";
+        if (MessageBox.Show(this,
+                $"将把 {targets.Count} 个游戏的本地清单打包成一个清单包文件（.gtm）：\n\n{preview}\n\n" +
+                "清单 / Key.vdf / 解锁 Lua 会一起打进这一个文件；缺解锁 Lua 的会自动补生成。\n" +
+                "对方在【更多 ▾ → 导入清单文件】选择这个文件（或直接拖进主窗口）即可导入部署。\n\n继续？",
+                "导出清单文件", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+
+        using var dlg = new SaveFileDialog
+        {
+            Title = "导出清单包",
+            Filter = "GamerTool 清单包 (*.gtm)|*.gtm",
+            FileName = "GamerTool清单包_" + DateTime.Now.ToString("yyyyMMdd") + ".gtm",
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        btnExportPack.Enabled = false;
+        UseWaitCursor = true;
+        try
+        {
+            var sources = targets.Select(e => new ManifestPack.ExportSource { AppId = e.AppId, Name = e.DisplayName, Dir = e.Folder }).ToList();
+            var res = await Task.Run(() => ManifestPack.Export(sources, dlg.FileName, t => Log(t, LogKind.Tool), CancellationToken.None));
+            Log($"✓ 清单包已导出: {dlg.FileName}", LogKind.Ok);
+            Log($"  共 {res.Games} 个游戏 · {res.Files} 个文件 · {ManifestPack.FmtBytes(res.Bytes)}" +
+                (res.SkippedEmpty > 0 ? $"（另有 {res.SkippedEmpty} 个空文件夹被跳过）" : ""), LogKind.Info);
+            try { Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + dlg.FileName + "\"") { UseShellExecute = true }); } catch { }
+        }
+        catch (OperationCanceledException) { Log("已取消导出。", LogKind.Warn); }
+        catch (Exception ex)
+        {
+            Log("✕ 导出失败: " + ex.Message, LogKind.Err);
+            MessageBox.Show(this, "导出失败：\n" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            UseWaitCursor = false;
+            UpdateDetails();
+        }
+    }
+
+    /// <summary>导入 .gtm 清单包：预览确认 → 落盘为 GamerTool 目录下的 [AppID] 文件夹。</summary>
+    private async Task ImportPackAsync(string packPath)
+    {
+        if (busyPack) return;
+        busyPack = true;
+        try
+        {
+            ManifestPack.PackInfo info;
+            try { info = ManifestPack.Inspect(packPath); }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "无法读取清单包：\n" + packPath + "\n\n" + ex.Message,
+                    "导入清单文件", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            if (info.Games.Count == 0)
+            {
+                MessageBox.Show(this, "这个清单包里没有游戏。", "导入清单文件", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            bool proceed = false, overwrite = false;
+            using (var d = new ImportPackDialog(store, info))
+            {
+                if (d.ShowDialog(this) == DialogResult.OK)
+                {
+                    overwrite = d.Overwrite;
+                    proceed = true;
+                }
+            }
+            if (!proceed) return;
+
+            UseWaitCursor = true;
+            var res = await Task.Run(() => ManifestPack.Import(packPath, store.S.GamerToolDir, overwrite, t => Log(t, LogKind.Tool), CancellationToken.None));
+
+            // 包内游戏名记入 games.json，导入后列表直接显示名字
+            bool dirty = false;
+            foreach (var g in info.Games)
+            {
+                if (!store.Records.TryGetValue(g.AppId, out var rec))
+                {
+                    rec = new GameRecord { AppId = g.AppId };
+                    store.Records[g.AppId] = rec;
+                }
+                if (rec.FetchedName == null && !string.IsNullOrWhiteSpace(g.Name)) { rec.FetchedName = g.Name; dirty = true; }
+            }
+            if (dirty) store.SaveRecords();
+
+            Log($"✓ 清单包导入完成：新导入 {res.Imported} 个游戏（{res.Files} 个文件，{ManifestPack.FmtBytes(res.Bytes)}）" +
+                (res.Skipped > 0 ? $"，已存在跳过 {res.Skipped} 个" : "") + "。", res.Imported > 0 ? LogKind.Ok : LogKind.Warn);
+            if (res.Imported > 0)
+                Log("提示: 选中导入的游戏点【部署到 Steam 解锁】即可注册。", LogKind.Warn);
+            RefreshAll();
+        }
+        catch (Exception ex)
+        {
+            Log("✕ 导入失败: " + ex.Message, LogKind.Err);
+            MessageBox.Show(this, "导入失败：\n" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            UseWaitCursor = false;
+            busyPack = false;
         }
     }
 

@@ -11,6 +11,7 @@
 | 📥 拉取清单 | 输入 AppID / 游戏名 / 粘贴商店链接，自动从多个清单仓库（分支即 AppID 的组织形式）检索并下载清单与 Key.vdf，**多任务并发** |
 | 🛜 清单提取 | 登录自己的 Steam 账号（Steam Guard 支持，本机只存 refresh token 不存密码），从**已拥有**的游戏直接提取 depot 密钥与最新 manifest，生成与拉取同构的 `[AppID]` 目录 |
 | 📤 清单收集 | 扫描收集目录（`[AppID]` 文件夹 / 散装 manifest+Key.vdf），批量上传到社区收集库 [GamerToolManifests](https://github.com/liushengliuyun/GamerToolManifests)（一个 AppID 一个分支），SHA 去重、只增不删、冲突保护；该仓库同时加入拉取镜像末尾，形成 提取→上传→拉取 闭环 |
+| 📦 清单包 | 把选中的本地清单（支持 Ctrl 多选）导出成**一个 .gtm 文件**分享；对方点主界面【导入清单】选择文件或把 .gtm 拖进主窗口即可导入，导入后选中即可部署 |
 | 🚀 部署解锁 | Lua → `stplug-in`、清单 → `depotcache`、addappid 目标登记进 `appids.db`，等价于拖 SteamTools 悬浮窗 |
 | ↩️ 还原未破解 | 精确删除该游戏的 Lua / 清单 / 登记行；支持一键"还原全部" |
 | 🌐 联网补名 | Steam 官方接口抓中文名，直连失败自动走代理 |
@@ -41,6 +42,7 @@
 ③ 游玩：Steam 库里出现游戏，正常下载
 ④ 还原：【还原未破解】恢复原状
 ⑤ 收集：【清单收集】登录 Steam 提取已拥有游戏 → 上传收集库，让别人也能拉取
+⑥ 分享：【导出清单文件】把本地清单打包成一个 .gtm 文件发给别人，对方拖进主窗口即可导入部署
 ```
 
 重启 Steam 时程序会按 **Steam 退出 → SteamTools 重启并等就绪 → 再启动 Steam** 的顺序拉起，最大化避免"重启后解锁失效"。

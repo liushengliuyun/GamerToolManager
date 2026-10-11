@@ -1420,6 +1420,161 @@ internal class CollectorDialog : Form
 
 }
 
+// ---------------- 清单包导入预览：列包内游戏与本地状态，选覆盖策略后开始导入 ----------------
+internal class ImportPackDialog : Form
+{
+    /// <summary>勾选后，已存在的游戏文件夹将被包内文件覆盖更新（只更新包内文件，不删本地多余文件）。</summary>
+    public bool Overwrite => chkOverwrite.Checked;
+
+    private readonly Store store;
+    private readonly ManifestPack.PackInfo info;
+    private readonly CheckBox chkOverwrite = new()
+    {
+        Text = "覆盖已存在的游戏文件夹（更新为包内清单版本）",
+        AutoSize = true,
+        ForeColor = Theme.Text,
+    };
+
+    public ImportPackDialog(Store store, ManifestPack.PackInfo info)
+    {
+        this.store = store;
+        this.info = info;
+        Text = "导入清单包 — " + Path.GetFileName(info.PackPath);
+        StartPosition = FormStartPosition.CenterParent;
+        ClientSize = new Size(780, 560);
+        MinimizeBox = false;
+        BackColor = Theme.Back;
+        ForeColor = Theme.Text;
+        Font = new Font("Microsoft YaHei UI", 9.5f);
+
+        // ---------- 顶部信息（FlowLayoutPanel 自适应，DPI 安全） ----------
+        var top = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Theme.Panel,
+            Padding = new Padding(12, 10, 12, 6),
+        };
+        top.Controls.Add(new Label
+        {
+            Text = $"清单包含 {info.Games.Count} 个游戏 · 解压后约 {ManifestPack.FmtBytes(info.TotalBytes)} · 包文件 {ManifestPack.FmtBytes(info.PackBytes)}" +
+                   (string.IsNullOrWhiteSpace(info.ExportedAt) ? "" : $" · 导出于 {info.ExportedAt}"),
+            AutoSize = true,
+            ForeColor = Theme.Sub,
+        });
+        top.Controls.Add(new Label
+        {
+            Text = "导入后清单落在 GamerTool 目录的 [AppID] 文件夹，选中游戏点【部署到 Steam 解锁】即可注册。已存在的游戏默认跳过。",
+            AutoSize = true,
+            ForeColor = Theme.Sub,
+        });
+
+        // ---------- 网格（只读，无复选列） ----------
+        var grid = new DataGridView
+        {
+            Dock = DockStyle.Fill,
+            BackgroundColor = Theme.Back,
+            BorderStyle = BorderStyle.None,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            AllowUserToResizeRows = false,
+            ReadOnly = true,
+            MultiSelect = false,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            RowHeadersVisible = false,
+            EnableHeadersVisualStyles = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+            GridColor = Theme.Border,
+            RowTemplate = { Height = 30 },
+        };
+        grid.ColumnHeadersHeight = 32;
+        grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+        grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+        grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = Theme.Panel,
+            ForeColor = Theme.Sub,
+            SelectionBackColor = Theme.Panel,
+            SelectionForeColor = Theme.Sub,
+            Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold),
+        };
+        grid.DefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = Theme.Back,
+            ForeColor = Theme.Text,
+            SelectionBackColor = Color.FromArgb(43, 58, 90),
+            SelectionForeColor = Theme.Text,
+        };
+        grid.Columns.Add("cId", "AppID");
+        grid.Columns.Add("cName", "名称");
+        grid.Columns.Add("cMani", "清单数");
+        grid.Columns.Add("cVdf", "Key.vdf");
+        grid.Columns.Add("cLua", "Lua");
+        grid.Columns.Add("cSize", "大小");
+        grid.Columns.Add("cState", "本地状态");
+        grid.Columns[0].FillWeight = 70;
+        grid.Columns[1].FillWeight = 170;
+        grid.Columns[2].FillWeight = 55;
+        grid.Columns[3].FillWeight = 55;
+        grid.Columns[4].FillWeight = 45;
+        grid.Columns[5].FillWeight = 70;
+        grid.Columns[6].FillWeight = 150;
+
+        var existing = Store.FolderIds(store.S.GamerToolDir);
+        foreach (var g in info.Games)
+        {
+            bool exists = existing.Contains(g.AppId);
+            int i = grid.Rows.Add(
+                g.AppId.ToString(),
+                string.IsNullOrEmpty(g.Name) ? "—" : g.Name,
+                g.ManifestCount.ToString(),
+                g.HasKeyVdf ? "✓" : "—",
+                g.HasLua ? "✓" : "—",
+                ManifestPack.FmtBytes(g.TotalBytes),
+                exists ? "已存在（默认跳过）" : "新游戏");
+            grid.Rows[i].Cells[6].Style.ForeColor = exists ? Theme.Yellow : Theme.Green;
+        }
+
+        // ---------- 底部：覆盖勾选 + 按钮 ----------
+        var bottom = new Panel { Dock = DockStyle.Bottom, Height = 46, BackColor = Theme.Panel };
+        var flowR = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Right,
+            FlowDirection = FlowDirection.RightToLeft,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Padding = new Padding(0, 7, 12, 7),
+        };
+        var btnOk = new Button { Text = "开始导入", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 30), Padding = new Padding(10, 0, 10, 0) };
+        var btnClose = new Button { Text = "取消", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 30), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 8, 0) };
+        UiHelper.Style(btnOk, true); UiHelper.Style(btnClose);
+        btnOk.Click += (_, _) => { DialogResult = DialogResult.OK; Close(); };
+        btnClose.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
+        flowR.Controls.Add(btnClose);   // RightToLeft：先加的在最右
+        flowR.Controls.Add(btnOk);
+
+        var flowL = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Left,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Padding = new Padding(12, 7, 0, 7),
+        };
+        flowL.Controls.Add(chkOverwrite);
+        bottom.Controls.Add(flowL);
+        bottom.Controls.Add(flowR);
+
+        Controls.Add(grid);
+        Controls.Add(bottom);
+        Controls.Add(top);
+    }
+}
+
 // ---------------- Steam Guard UI 适配器：SteamKit 在任意线程回调，这里转到 UI 线程弹窗 ----------------
 internal class UiAuthenticator : IAuthenticator
 {
