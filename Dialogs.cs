@@ -691,73 +691,93 @@ internal class CollectorDialog : Form
 
     void BuildUi()
     {
-        // ---------- 顶部：目录行 + Steam 行 ----------
-        var top = new Panel { Dock = DockStyle.Top, Height = 104, BackColor = Theme.Panel };
-        var row1 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(10, 8, 0, 0) };
-        var row2 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(10, 4, 0, 0) };
+        // 本地助手：按钮全部 AutoSize（同主窗体 ToolBtn 模式），任何 DPI 缩放都不裁字
+        void AutoSizeBtn(Button b, bool primary = false)
+        {
+            b.AutoSize = true;
+            b.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            b.MinimumSize = new Size(0, 32);
+            b.Padding = new Padding(8, 0, 8, 0);
+            UiHelper.Style(b, primary);
+        }
 
-        var lblDir = new Label { Text = "收集目录:", AutoSize = true, ForeColor = Theme.Sub, Margin = new Padding(0, 8, 8, 0) };
-        txtDir.Width = 380;
+        // ---------- 顶部：目录行 + Steam 行（FlowLayoutPanel 自适应高度） ----------
+        var top = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Theme.Panel,
+            Padding = new Padding(10, 8, 10, 2),
+        };
+        var row1 = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0) };
+        var row2 = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0, 2, 0, 0) };
+
+        var lblDir = new Label { Text = "收集目录:", AutoSize = true, ForeColor = Theme.Sub, Margin = new Padding(0, 10, 8, 0) };
+        txtDir.Width = 340;
         txtDir.BackColor = Theme.Input; txtDir.ForeColor = Theme.Text; txtDir.BorderStyle = BorderStyle.FixedSingle;
-        txtDir.Margin = new Padding(0, 5, 8, 0);
+        txtDir.Margin = new Padding(0, 6, 8, 0);
         var btnBrowse = new Button { Text = "浏览" };
-        UiHelper.Style(btnBrowse);
-        btnBrowse.Margin = new Padding(0, 5, 8, 0);
+        AutoSizeBtn(btnBrowse);
+        btnBrowse.Margin = new Padding(0, 3, 8, 0);
         btnBrowse.Click += (_, _) =>
         {
             using var d = new FolderBrowserDialog { Description = "选择清单收集目录" };
             if (Directory.Exists(txtDir.Text)) d.SelectedPath = txtDir.Text;
             if (d.ShowDialog(this) == DialogResult.OK) { txtDir.Text = d.SelectedPath; PersistDir(); ScanDir(); }
         };
-        UiHelper.Style(btnScan, true);
-        btnScan.Margin = new Padding(0, 5, 12, 0);
+        AutoSizeBtn(btnScan, true);
+        btnScan.Margin = new Padding(0, 3, 10, 0);
         btnScan.Click += (_, _) => ScanDir();
         lblTokenHint.AutoSize = true;
         lblTokenHint.ForeColor = Theme.Sub;
-        lblTokenHint.Margin = new Padding(0, 10, 0, 0);
+        lblTokenHint.Margin = new Padding(0, 11, 0, 0);
         row1.Controls.AddRange(new Control[] { lblDir, txtDir, btnBrowse, btnScan, lblTokenHint });
 
         lblSteam.AutoSize = true;
         lblSteam.ForeColor = Theme.Sub;
-        lblSteam.Margin = new Padding(0, 9, 10, 0);
-        UiHelper.Style(btnSteam);
-        btnSteam.Margin = new Padding(0, 5, 8, 0);
+        lblSteam.Margin = new Padding(0, 10, 10, 0);
+        AutoSizeBtn(btnSteam);
+        btnSteam.Margin = new Padding(0, 3, 8, 0);
         btnSteam.Click += (_, _) => ToggleSteamPanel();
-        UiHelper.Style(btnExtract, true);
-        btnExtract.Margin = new Padding(0, 5, 8, 0);
+        AutoSizeBtn(btnExtract, true);
+        btnExtract.Margin = new Padding(0, 3, 8, 0);
         btnExtract.Click += async (_, _) => await ExtractAsync();
-        UiHelper.Style(btnOwned);
-        btnOwned.Margin = new Padding(0, 5, 0, 0);
+        AutoSizeBtn(btnOwned);
+        btnOwned.Margin = new Padding(0, 3, 0, 0);
         btnOwned.Click += async (_, _) => await ChooseOwnedAsync();
         row2.Controls.AddRange(new Control[] { lblSteam, btnSteam, btnExtract, btnOwned });
 
-        // Steam 登录小组（隐藏在 row2 下方，未登录且点登录时展开）
+        // Steam 登录小组（未登录且点「登录 Steam」时展开；内容自适应 DPI）
         grpLogin.Text = "Steam 登录（凭据只在本机换取 refresh token，密码不留存）";
         grpLogin.ForeColor = Theme.Sub;
         grpLogin.BackColor = Theme.Panel;
-        grpLogin.Dock = DockStyle.Top;
-        grpLogin.Height = 92;
+        grpLogin.AutoSize = true;
+        grpLogin.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        grpLogin.Padding = new Padding(8, 2, 8, 6);
+        grpLogin.Margin = new Padding(0, 4, 0, 0);
         grpLogin.Visible = false;
-        txtUser.Width = 200;
+        var loginFlow = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0) };
+        txtUser.Width = 180;
         txtUser.PlaceholderText = "账号";
         StyleBox(txtUser);
-        txtUser.Location = new Point(14, 30);
-        txtPass.Width = 200;
+        txtUser.Margin = new Padding(0, 3, 8, 3);
+        txtPass.Width = 180;
         txtPass.PlaceholderText = "密码";
         txtPass.PasswordChar = '●';
         StyleBox(txtPass);
-        txtPass.Location = new Point(230, 30);
-        UiHelper.Style(btnDoLogin, true);
-        btnDoLogin.Location = new Point(446, 29);
+        txtPass.Margin = new Padding(0, 3, 8, 3);
+        AutoSizeBtn(btnDoLogin, true);
+        btnDoLogin.Margin = new Padding(0, 3, 0, 3);
         btnDoLogin.Click += async (_, _) => await LoginAsync();
-        grpLogin.Controls.Add(txtUser);
-        grpLogin.Controls.Add(txtPass);
-        grpLogin.Controls.Add(btnDoLogin);
+        loginFlow.Controls.AddRange(new Control[] { txtUser, txtPass, btnDoLogin });
+        grpLogin.Controls.Add(loginFlow);
 
-        top.Controls.Add(grpLogin);
-        top.Controls.Add(row2);
         top.Controls.Add(row1);
-        // Dock 自上而下堆叠顺序：后加的在上 —— row1 最上，然后 row2，再 grpLogin
+        top.Controls.Add(row2);
+        top.Controls.Add(grpLogin);
 
         // ---------- 网格 ----------
         grid.Dock = DockStyle.Fill;
@@ -806,22 +826,21 @@ internal class CollectorDialog : Form
         grid.Columns[5].FillWeight = 60;
         grid.Columns[6].FillWeight = 130;
 
-        // ---------- 底部按钮行 + 日志 ----------
+        // ---------- 底部按钮行 + 日志（AutoSize，任何 DPI 不裁字） ----------
         var btnAll = new Button { Text = "全选/全不选" };
-        UiHelper.Style(btnAll);
+        AutoSizeBtn(btnAll);
         var btnClose = new Button { Text = "关闭" };
-        UiHelper.Style(btnClose);
+        AutoSizeBtn(btnClose);
         var bottomFlow = new FlowLayoutPanel
         {
-            Dock = DockStyle.Bottom, Height = 46,
+            Dock = DockStyle.Bottom,
             FlowDirection = FlowDirection.RightToLeft, BackColor = Theme.Panel,
-            Padding = new Padding(0, 7, 12, 7),
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(0, 6, 12, 6),
         };
-        btnUpload.Width = btnScan.Width = btnAll.Width = btnStop.Width = btnClose.Width = 104;
-        btnUpload.Height = btnStop.Height = btnClose.Height = 30;
-        UiHelper.Style(btnUpload, true);
-        UiHelper.Style(btnStop);
-        btnAll.Height = 30;
+        AutoSizeBtn(btnUpload, true);
+        AutoSizeBtn(btnStop);
         btnUpload.Margin = btnAll.Margin = new Padding(0, 0, 8, 0);
         btnStop.Margin = btnClose.Margin = new Padding(0, 0, 8, 0);
         btnUpload.Click += async (_, _) => await UploadSelectedAsync();
@@ -863,7 +882,7 @@ internal class CollectorDialog : Form
         }
         else
         {
-            lblTokenHint.Text = "⚠ 未内置上传令牌（公开源码构建）：扫描可用，上传需按 Secrets.cs.example 配置后重新编译";
+            lblTokenHint.Text = "⚠ 未内置上传令牌，上传不可用 —— 见 Secrets.cs.example";
             lblTokenHint.ForeColor = Theme.Yellow;
         }
     }
