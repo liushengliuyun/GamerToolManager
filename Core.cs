@@ -752,6 +752,9 @@ public partial class Store
             // GitHub API 要求 User-Agent，缺失会 403
             c.DefaultRequestHeaders.UserAgent.ParseAdd("GamerToolManager/1.0");
             c.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json, application/json");
+            // 内置令牌（仅收集仓库范围）用于提升 api.github.com 限速：匿名 60 次/小时 → 认证 5000 次/小时
+            if (!string.IsNullOrWhiteSpace(Collector.UploadToken))
+                c.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Collector.UploadToken);
             return c;
         }
 
@@ -909,6 +912,11 @@ public partial class Store
                     {
                         // api.github 对不存在的分支返回 404 —— 属正常轮换，不是故障
                         log($"该仓库没有 {appid} 分支，换下一个。", LogKind.Tool);
+                        continue;
+                    }
+                    catch (HttpRequestException hex) when (hex.Message.Contains("403"))
+                    {
+                        log("⚠ GitHub 匿名限速（403，60 次/小时）—— 该仓库探测跳过；稍后再拉即可恢复。", LogKind.Warn);
                         continue;
                     }
                     catch (Exception ex)
