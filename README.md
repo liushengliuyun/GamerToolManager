@@ -45,6 +45,14 @@
 ⑥ 分享：【导出清单文件】把本地清单打包成一个 .gtm 文件发给别人，对方拖进主窗口即可导入部署
 ```
 
+## 📥 清单包导入图解
+
+拿到别人分享的 `.gtm` 清单包后，三步完成解锁：
+
+| ① 从 Release 下载清单包 | ② 主界面点【导入清单】 | ③ 全选 → 部署 |
+|---|---|---|
+| <img src="docs/import-step1-release.png" width="420"/> | <img src="docs/import-step2-import.png" width="420"/> | <img src="docs/import-step3-deploy.png" width="420"/> |
+
 重启 Steam 时程序会按 **Steam 退出 → SteamTools 重启并等就绪 → 再启动 Steam** 的顺序拉起，最大化避免"重启后解锁失效"。
 
 ## 🛠️ 从源码构建
