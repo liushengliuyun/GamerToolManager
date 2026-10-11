@@ -1329,7 +1329,12 @@ internal class CollectorDialog : Form
             AppendLog("⚠ 需要先登录 Steam（在上方输入账号密码）。", Theme.Yellow);
         }
         catch (OperationCanceledException) { AppendLog("已手动取消提取。", Theme.Yellow); }
-        catch (Exception ex) { AppendLog("✕ 提取失败: " + ex.Message, Theme.Red); }
+        catch (Exception ex)
+        {
+            AppendLog("✕ 提取失败: " + ex.Message, Theme.Red);
+            var frame = (ex.StackTrace ?? "").Split('\n').FirstOrDefault()?.Trim();
+            if (!string.IsNullOrEmpty(frame)) AppendLog("  at " + frame, Theme.ToolC);
+        }
         finally { SetBusy(false); }
     }
 

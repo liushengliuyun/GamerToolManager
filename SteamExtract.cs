@@ -326,9 +326,15 @@ internal sealed class SteamExtractor : IDisposable
 
         var set = new HashSet<uint>();
         foreach (var res in rs.Results)
+        {
+            if (res.Packages == null) continue;   // ResponsePending 回调不带数据
             foreach (var pkg in res.Packages.Values)
+            {
+                if (pkg.KeyValues == null) continue;
                 foreach (var child in pkg.KeyValues["appids"].Children)
                     if (uint.TryParse(child.Value, out var id)) set.Add(id);
+            }
+        }
         ownedApps = set;
         log?.Invoke($"✓ 已拥有 {set.Count} 个游戏。", LogKind.Ok);
         return set;
@@ -358,7 +364,9 @@ internal sealed class SteamExtractor : IDisposable
         // 2) 应用信息（token → product info）
         log?.Invoke($"获取 {appid} 的应用信息…", LogKind.Tool);
         var tokens = await steamApps.PICSGetAccessTokens((uint)appid, null);
-        tokens.AppTokens.TryGetValue((uint)appid, out var accessToken);
+        uint accessToken = 0;
+        if (tokens?.AppTokens != null)
+            tokens.AppTokens.TryGetValue((uint)appid, out accessToken);
 
         var appRs = await steamApps.PICSGetProductInfo(
             new SteamApps.PICSRequest((uint)appid, accessToken), null, false);
@@ -366,9 +374,14 @@ internal sealed class SteamExtractor : IDisposable
 
         SteamApps.PICSProductInfoCallback.PICSProductInfo appInfo = null;
         foreach (var res in appRs.Results)
+        {
+            if (res.Apps == null) continue;   // ResponsePending 回调不带数据
             if (res.Apps.TryGetValue((uint)appid, out var info)) { appInfo = info; break; }
+        }
         if (appInfo == null)
             throw new InvalidOperationException("Steam 上找不到该 AppID 的信息（未发售或已下架）。");
+        if (appInfo.KeyValues == null || appInfo.KeyValues.Children.Count == 0)
+            throw new InvalidOperationException("未能取得该游戏的应用信息（缺少访问令牌或数据为空）。");
 
         var kv = appInfo.KeyValues;
         string name = kv["common"]["name"].AsString();
