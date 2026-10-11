@@ -25,7 +25,7 @@ public class MainForm : Form
     private readonly Label lblBig = new();
     private readonly Label lblInfo = new();
     private readonly Label lblHint = new();
-    private Button btnOpenFolder, btnDeploy, btnRestore, btnLocate, btnDelLua, btnDelFolder, btnRename, btnFetch, btnRePull;
+    private Button btnOpenFolder, btnDeploy, btnRestore, btnLocate, btnDelLua, btnDelFolder, btnRename, btnFetch, btnRePull, btnUploadCollect;
 
     public MainForm()
     {
@@ -377,6 +377,7 @@ public class MainForm : Form
         ActBtn("打开游戏文件夹", ref btnOpenFolder, (_, _) => OpenExplorer(Selected()?.Folder));
         ActBtn("部署到 Steam 解锁", ref btnDeploy, async (_, _) => await DeploySelectedAsync());
         ActBtn("重新拉取清单", ref btnRePull, async (_, _) => await RePullSelectedAsync());
+        ActBtn("上传到收集库", ref btnUploadCollect, async (_, _) => await UploadSelectedToCollectAsync());
         ActBtn("还原未破解", ref btnRestore, async (_, _) => await RestoreSelectedAsync(), danger: true);
         ActBtn("定位已部署 Lua", ref btnLocate, (_, _) => LocateDeployed());
         ActBtn("删除 Lua 文件", ref btnDelLua, (_, _) => DeleteSourceLua(), danger: true);
@@ -552,6 +553,7 @@ public class MainForm : Form
         btnOpenFolder.Enabled = any && e.FolderExists;
         btnDeploy.Enabled = any && e.SourceLuaExists;
         btnRePull.Enabled = any && e.FolderExists && !AppBusy(e.AppId);
+        btnUploadCollect.Enabled = any && e.FolderExists && (e.SourceLuaExists || e.LocalManifests.Count > 0);
         btnRestore.Enabled = any && (e.Deployed || (store.SteamDirEff != "" && store.RegisteredDbIds(e).Count > 0));
         btnLocate.Enabled = any && e.Deployed;
         btnDelLua.Enabled = any && e.SourceLuaExists;
@@ -1093,6 +1095,66 @@ public class MainForm : Form
                     (ok > 0 ? $"分支见 github.com/{Collector.Owner}/{Collector.Repo}" : ""), ok > 0 ? LogKind.Ok : LogKind.Warn),
         };
         d.ShowDialog(this);
+    }
+
+    /// <summary>把选中游戏的本地清单直接上传到收集库（不经收集对话框扫描）。</summary>
+    private async Task UploadSelectedToCollectAsync()
+    {
+        var e = Selected();
+        if (e == null || !e.FolderExists) return;
+        if (Collector.UploadToken == "")
+        {
+            MessageBox.Show(this,
+                "当前构建没有内置上传令牌。\n\n维护者按 Secrets.cs.example 配好令牌重新编译后即可上传。",
+                "上传清单", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var set = new Collector.CollectSet
+        {
+            AppId = e.AppId,
+            Recognized = true,
+            Dir = e.Folder,
+            DisplayName = e.DisplayName,
+            Manifests = e.LocalManifests.ToList(),
+            VdfLocal = new[] { "Key.vdf", "config.vdf" }
+                .Select(n => Path.Combine(e.Folder, n))
+                .FirstOrDefault(File.Exists),
+            HasLua = e.SourceLuaExists,
+        };
+        if (set.Manifests.Count == 0 && set.VdfLocal == null)
+        {
+            MessageBox.Show(this, "该游戏文件夹里没有清单和 Key.vdf，无法上传。\n请先拉取或提取。", "上传清单", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (MessageBox.Show(this,
+                $"将把「{e.DisplayName}」（{e.AppId}）上传到 {Collector.RepoSlug}。\n已有分支只提交差异，不删除远端文件。\n\n继续？",
+                "上传清单", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+
+        btnUploadCollect.Enabled = false;
+        try
+        {
+            await Collector.EnsureRepoAsync(store.ProxyEff);
+            var r = await Collector.UploadSetAsync(store, set, t => Log("  " + t, LogKind.Tool), CancellationToken.None);
+            if (r.Skipped)
+                Log($"✓ {e.DisplayName} 远端已是最新，无需提交。", LogKind.Ok);
+            else
+                Log($"✓ 已上传 {e.DisplayName}：{r.UploadedFiles} 个文件，commit {r.CommitSha}。", LogKind.Ok);
+        }
+        catch (Collector.ApiException aex) when (aex.Status == 422)
+        {
+            Log($"⚠ {e.AppId} 分支在期间被他人更新（冲突），未覆盖；稍后重试。", LogKind.Warn);
+        }
+        catch (Exception ex)
+        {
+            Log("✕ 上传失败: " + ex.Message, LogKind.Err);
+        }
+        finally
+        {
+            btnUploadCollect.Enabled = true;
+            UpdateDetails();
+        }
     }
 
     private void ShowSettings()
