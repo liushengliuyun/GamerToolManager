@@ -724,9 +724,13 @@ public partial class Store
             "Auiowu/ManifestAutoUpdate",
             "steamtools-games/ManifestHub3",
             "steamtoolsapp/ManifestHub",
-            "tymolu233/ManifestAutoUpdate",
             "SteamAutoCracks/ManifestHub",
             "ikun0014/ManifestHub",
+            "tymolu233/ManifestAutoUpdate",
+            "manilua-hub/ManifestHub3",           // 2026-10 实测分支结构有效
+            "ooiiuur/ManifestHub",                // 同上
+            "tymolu233/ManifestAutoUpdate-fix",   // 同上
+            "dc190/ManifestHub",                  // 覆盖较少，兜底
             "liushengliuyun/GamerToolManifests", // 本工具社区收集库（上传↔拉取闭环），放最后兜底
         };
         static readonly string[] Mirrors =
