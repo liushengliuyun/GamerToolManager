@@ -429,7 +429,7 @@ public class MainForm : Form
 
         // ---------- 底部日志 ----------
         var bottom = new Panel { Dock = DockStyle.Bottom, Height = 168, BackColor = Color.FromArgb(18, 20, 26), Padding = new Padding(0, 6, 0, 0) };
-        var logHead = new Label { Text = " 运行日志", Dock = DockStyle.Top, Height = 24, ForeColor = Theme.Sub, BackColor = Theme.Panel };
+        var logHead = new Label { Text = " 运行日志", Dock = DockStyle.Top, AutoSize = true, ForeColor = Theme.Sub, BackColor = Theme.Panel };
         rtbLog.Dock = DockStyle.Fill;
         rtbLog.BackColor = Color.FromArgb(18, 20, 26);
         rtbLog.ForeColor = Theme.Text;

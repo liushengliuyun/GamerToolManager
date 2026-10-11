@@ -455,7 +455,7 @@ internal class OrphanDialog : Form
     {
         this.store = store;
         this.ids = ids;
-        Text = "SteamTools 孤儿登记项 — appids.db";
+        Text = "清理孤儿登记";
         StartPosition = FormStartPosition.CenterParent;
         ClientSize = new Size(520, 520);
         BackColor = Theme.Back;
@@ -465,7 +465,7 @@ internal class OrphanDialog : Form
         var lbl = new Label
         {
             Dock = DockStyle.Top,
-            Height = 66,
+            AutoSize = true,
             Text = "以下 AppID 登记在 SteamTools 的 appids.db 中，但没有任何解锁 Lua 覆盖它们，\n" +
                    "通常是 Lua 已被删除后的残留。勾选要清理的项（默认全选），点击清理。\n" +
                    "注意：如果这些是你仍需要的功能（如悬浮窗登记的解密 Key），请不要清理。",
@@ -480,10 +480,18 @@ internal class OrphanDialog : Form
         list.BorderStyle = BorderStyle.None;
         list.CheckOnClick = true;
 
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 46, FlowDirection = FlowDirection.RightToLeft, BackColor = Theme.Panel };
-        var btnClean = new Button { Text = "清理勾选项", Width = 110, Height = 30 };
-        var btnAll = new Button { Text = "全选/全不选", Width = 100, Height = 30, Margin = new Padding(0, 0, 8, 0) };
-        var btnClose = new Button { Text = "关闭", Width = 88, Height = 30, Margin = new Padding(0, 0, 8, 0) };
+        var flow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            FlowDirection = FlowDirection.RightToLeft,
+            BackColor = Theme.Panel,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(0, 8, 12, 8),
+        };
+        var btnClean = new Button { Text = "清理勾选项", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 30), Padding = new Padding(10, 0, 10, 0) };
+        var btnAll = new Button { Text = "全选/全不选", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 30), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 8, 0) };
+        var btnClose = new Button { Text = "关闭", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 30), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 8, 0) };
         UiHelper.Style(btnClean, true); UiHelper.Style(btnAll); UiHelper.Style(btnClose);
         flow.Controls.Add(btnClose); flow.Controls.Add(btnAll); flow.Controls.Add(btnClean);
         flow.Padding = new Padding(0, 8, 12, 8);
