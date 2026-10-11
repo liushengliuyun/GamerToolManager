@@ -25,7 +25,7 @@ public class MainForm : Form
     private readonly Label lblBig = new();
     private readonly Label lblInfo = new();
     private readonly Label lblHint = new();
-    private Button btnOpenFolder, btnDeploy, btnRestore, btnLocate, btnDelLua, btnDelFolder, btnRename, btnFetch, btnRePull, btnUploadCollect;
+    private Button btnOpenFolder, btnDeploy, btnRestore, btnLocate, btnDelLua, btnDelFolder, btnRename, btnFetch, btnRePull, btnUploadCollect, btnReExtract;
 
     public MainForm()
     {
@@ -220,6 +220,18 @@ public class MainForm : Form
         btnPullGo = new Button { Text = "开始拉取", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 32), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 0, 0) };
         UiHelper.Style(btnPullGo, true);
         btnPullGo.Click += async (_, _) => await PullFromMainAsync();
+        var btnExtractGo = new Button { Text = "提取", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 32), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 10, 0) };
+        UiHelper.Style(btnExtractGo);
+        btnExtractGo.Click += async (_, _) =>
+        {
+            var input = txtPull.Text.Trim();
+            if (input.Length == 0)
+            {
+                MessageBox.Show(this, "请输入 AppID 或粘贴商店链接（提取需已登录 Steam）。", "提取", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            await ExtractFromMainAsync(input);
+        };
         txtPull.KeyDown += async (_, e) =>
         {
             if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await PullFromMainAsync(); }
@@ -227,6 +239,7 @@ public class MainForm : Form
         pullFlow.Controls.Add(lblPull);
         pullFlow.Controls.Add(txtPull);
         pullFlow.Controls.Add(btnPullGo);
+        pullFlow.Controls.Add(btnExtractGo);
         pullBar.Controls.Add(pullFlow);
 
         // ---------- 主区 ----------
@@ -377,6 +390,7 @@ public class MainForm : Form
         ActBtn("打开游戏文件夹", ref btnOpenFolder, (_, _) => OpenExplorer(Selected()?.Folder));
         ActBtn("部署到 Steam 解锁", ref btnDeploy, async (_, _) => await DeploySelectedAsync());
         ActBtn("重新拉取清单", ref btnRePull, async (_, _) => await RePullSelectedAsync());
+        ActBtn("重新从 Steam 提取", ref btnReExtract, async (_, _) => await ReExtractSelectedAsync());
         ActBtn("上传到收集库", ref btnUploadCollect, async (_, _) => await UploadSelectedToCollectAsync());
         ActBtn("还原未破解", ref btnRestore, async (_, _) => await RestoreSelectedAsync(), danger: true);
         ActBtn("定位已部署 Lua", ref btnLocate, (_, _) => LocateDeployed());
@@ -553,6 +567,7 @@ public class MainForm : Form
         btnOpenFolder.Enabled = any && e.FolderExists;
         btnDeploy.Enabled = any && e.SourceLuaExists;
         btnRePull.Enabled = any && e.FolderExists && !AppBusy(e.AppId);
+        btnReExtract.Enabled = any && e.FolderExists && !AppBusy(e.AppId);
         btnUploadCollect.Enabled = any && e.FolderExists && (e.SourceLuaExists || e.LocalManifests.Count > 0);
         btnRestore.Enabled = any && (e.Deployed || (store.SteamDirEff != "" && store.RegisteredDbIds(e).Count > 0));
         btnLocate.Enabled = any && e.Deployed;
@@ -1079,6 +1094,84 @@ public class MainForm : Form
         using var d = new OrphanDialog(store, ids);
         d.ShowDialog(this);
         RefreshAll();
+    }
+
+    /// <summary>主界面快捷提取：输入 AppID / 链接 / 游戏名，直接从 Steam 提取。</summary>
+    private async Task ExtractFromMainAsync(string input)
+    {
+        long appid;
+        var linkId = Store.ExtractAppId(input);
+        if (linkId != null) appid = linkId.Value;
+        else if (long.TryParse(input, out appid) && input.Length >= 4) { }
+        else
+        {
+            Log("搜索 Steam 商店: " + input, LogKind.Info);
+            List<(long id, string name)> matches;
+            try { matches = await Store.NativePuller.SearchGamesAsync(input, store.ProxyEff); }
+            catch (Exception ex) { Log("✕ 搜索失败: " + ex.Message, LogKind.Err); return; }
+            if (matches.Count == 0) { Log("✕ 未搜索到匹配的游戏（可尝试英文名或直接输 AppID）。", LogKind.Warn); return; }
+            if (matches.Count == 1) { appid = matches[0].id; }
+            else
+            {
+                using var chooser = new GameChooser(matches.Take(15).ToList());
+                if (chooser.ShowDialog(this) != DialogResult.OK) return;
+                appid = chooser.PickId;
+            }
+        }
+
+        if (AppBusy(appid)) { Log(appid + " 正在处理中，不重复发起。", LogKind.Warn); return; }
+        PullBegin(appid);
+        try
+        {
+            Log($"== 从 Steam 提取 {appid} 的最新清单…", LogKind.Info);
+            var r = await SteamExtractor.Default.ExtractAsync(appid, store.S.GamerToolDir, CancellationToken.None, (t, k) => Log(t, k));
+            Log($"✓ 提取完成: {r.Dir}" + (r.FailedDepots.Count > 0 ? $"（⚠ {r.FailedDepots.Count} 个 depot 失败）" : "") +
+                " —— 可直接部署或【上传到收集库】。", r.FailedDepots.Count > 0 ? LogKind.Warn : LogKind.Ok);
+            txtPull.Text = appid.ToString();
+        }
+        catch (NeedsLoginException)
+        {
+            Log("⚠ 尚未登录 Steam —— 打开【清单收集】登录一次即可（之后免登录）。", LogKind.Warn);
+        }
+        catch (Exception ex)
+        {
+            Log("✕ 提取失败: " + ex.Message, LogKind.Err);
+        }
+        finally
+        {
+            PullEnd(appid);
+            RefreshAll();
+        }
+    }
+
+    /// <summary>重新从 Steam 提取选中游戏的最新清单（写回原文件夹，相当于提取版的重新拉取）。</summary>
+    private async Task ReExtractSelectedAsync()
+    {
+        var e = Selected();
+        if (e == null || !e.FolderExists) return;
+        if (AppBusy(e.AppId)) { Log(e.AppId + " 正在处理中，不重复发起。", LogKind.Warn); return; }
+        PullBegin(e.AppId);
+        try
+        {
+            Log($"== 从 Steam 重新提取 {e.DisplayName}（{e.AppId}）的最新清单…", LogKind.Info);
+            var r = await SteamExtractor.Default.ExtractAsync(e.AppId, store.S.GamerToolDir, CancellationToken.None,
+                (t, k) => Log(t, k), existingDir: e.Folder);
+            Log($"✓ 重新提取完成（{r.Files} 个文件）—— 重新【部署】一次即可更新到最新版本。" +
+                (r.FailedDepots.Count > 0 ? $" ⚠ {r.FailedDepots.Count} 个 depot 失败。" : ""), r.FailedDepots.Count > 0 ? LogKind.Warn : LogKind.Ok);
+        }
+        catch (NeedsLoginException)
+        {
+            Log("⚠ 尚未登录 Steam —— 打开【清单收集】登录一次即可。", LogKind.Warn);
+        }
+        catch (Exception ex)
+        {
+            Log("✕ 重新提取失败: " + ex.Message, LogKind.Err);
+        }
+        finally
+        {
+            PullEnd(e.AppId);
+            RefreshAll();
+        }
     }
 
     private void ShowCollector()

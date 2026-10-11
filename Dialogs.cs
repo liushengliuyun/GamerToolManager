@@ -824,6 +824,8 @@ internal class CollectorDialog : Form
         UpdateTokenHint();
         UpdateSteamUi();
         extractor.StateChanged += OnSteamStateChanged;
+        // 打开即自动扫描上次目录，免去手点
+        Shown += (_, _) => ScanDir();
         FormClosing += (_, _) =>
         {
             store.S.CollectWinW = Width;

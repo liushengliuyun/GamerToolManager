@@ -350,9 +350,9 @@ internal sealed class SteamExtractor : IDisposable
         public List<uint> FailedDepots = new();
     }
 
-    /// <summary>从 Steam 提取一个已拥有游戏的清单（manifest + Key.vdf + 解锁 Lua），输出 [AppID] 目录。</summary>
+    /// <summary>从 Steam 提取一个已拥有游戏的清单（manifest + Key.vdf + 解锁 Lua），输出 [AppID] 目录；existingDir 非空时写入该目录（重新提取）。</summary>
     public async Task<ExtractResult> ExtractAsync(long appid, string rootDir, CancellationToken ct,
-        Action<string, LogKind> log = null)
+        Action<string, LogKind> log = null, string existingDir = null)
     {
         await EnsureLoggedOnAsync(ct, log).ConfigureAwait(false);
 
@@ -406,10 +406,10 @@ internal sealed class SteamExtractor : IDisposable
             throw new InvalidOperationException("该应用没有可提取的内容 depot。");
         log?.Invoke($"共 {depots.Count} 个 depot 需要提取。", LogKind.Info);
 
-        // 4) 目标目录（与拉取产物同构）
+        // 4) 目标目录（与拉取产物同构；重新提取时写回原文件夹）
         string dirName = "[" + appid + "]" + name;
         foreach (char c in Path.GetInvalidFileNameChars()) dirName = dirName.Replace(c, '_');
-        string dir = Path.Combine(rootDir, dirName);
+        string dir = existingDir ?? Path.Combine(rootDir, dirName);
         Directory.CreateDirectory(dir);
 
         // 5) 逐 depot：密钥 → CDN 下载 manifest
