@@ -956,15 +956,13 @@ internal class CollectorDialog : Form
             SelectionBackColor = Color.FromArgb(43, 58, 90),
             SelectionForeColor = Theme.Text,
         };
-        grid.Columns.Add("cCheck", "");
+        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "cCheck", HeaderText = "", Width = 40, AutoSizeMode = DataGridViewAutoSizeColumnMode.None });
         grid.Columns.Add("cId", "AppID");
         grid.Columns.Add("cName", "名称");
         grid.Columns.Add("cCount", "清单数");
         grid.Columns.Add("cVdf", "Key.vdf");
         grid.Columns.Add("cSize", "大小");
         grid.Columns.Add("cState", "状态");
-        grid.Columns[0].Width = 40;
-        grid.Columns[0].AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
         grid.Columns[1].FillWeight = 70;
         grid.Columns[2].FillWeight = 160;
         grid.Columns[3].FillWeight = 55;
@@ -1102,8 +1100,6 @@ internal class CollectorDialog : Form
             if (!s.Recognized)
             {
                 grid.Rows[i].Cells[0].Value = false;
-                var cell = grid.Rows[i].Cells[0] as DataGridViewCheckBoxCell;
-                cell.Value = false;
                 grid.Rows[i].Cells[0].ReadOnly = true;
                 grid.Rows[i].Cells[6].Style.ForeColor = Theme.Sub;
             }
