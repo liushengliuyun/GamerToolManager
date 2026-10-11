@@ -135,6 +135,15 @@ internal sealed class SteamExtractor : IDisposable
                 StateChanged?.Invoke();
             }
         });
+        // 授权列表常驻订阅：Steam 只在登录后主动推送一次，错过订阅时机就再也收不到 ——
+        // 必须在连接前订好并缓存（GetOwnedAppsAsync 曾因此等待超时）
+        manager.Subscribe<SteamApps.LicenseListCallback>(cb =>
+        {
+            if (cb.LicenseList is not { Count: > 0 }) return;
+            packageIds.Clear();
+            packageIds.AddRange(cb.LicenseList.Select(l => l.PackageID));
+            licensesReceived = true;
+        });
         StartPump();
     }
 
@@ -303,13 +312,10 @@ internal sealed class SteamExtractor : IDisposable
 
         if (!licensesReceived)
         {
-            // 登录后 Steam 会推送 LicenseListCallback；刚登录可能尚未到达，等它
-            packageIds.Clear();
-            var cb = await WaitFor<SteamApps.LicenseListCallback>(
-                c => c.LicenseList is { Count: > 0 }, 20, ct).ConfigureAwait(false);
-            packageIds.AddRange(cb.LicenseList.Select(l => l.PackageID));
-            licensesReceived = true;
-            log?.Invoke($"✓ 已获取授权列表（{packageIds.Count} 个许可）。", LogKind.Tool);
+            // 常驻订阅通常已缓存；这里只处理"刚登录、列表还在路上"的情况
+            log?.Invoke("等待 Steam 授权列表…", LogKind.Tool);
+            await WaitFor<SteamApps.LicenseListCallback>(
+                c => c.LicenseList is { Count: > 0 }, 30, ct);
         }
 
         log?.Invoke("正在获取已拥有游戏列表（PICS 包信息）…", LogKind.Tool);
