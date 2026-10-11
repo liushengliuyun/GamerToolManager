@@ -364,7 +364,7 @@ internal sealed class SteamExtractor : IDisposable
         // 2) 应用信息（token → product info）
         log?.Invoke($"获取 {appid} 的应用信息…", LogKind.Tool);
         var tokens = await steamApps.PICSGetAccessTokens((uint)appid, null);
-        uint accessToken = 0;
+        ulong accessToken = 0;
         if (tokens?.AppTokens != null)
             tokens.AppTokens.TryGetValue((uint)appid, out accessToken);
 
