@@ -604,11 +604,11 @@ internal class GameChooser : Form
         ForeColor = Theme.Text;
         Font = new Font("Microsoft YaHei UI", 9.5f);
 
-        // 顶部说明 + 过滤框（AutoSize，任何 DPI 不裁字）
+        // 顶部：说明一行 + 过滤框一行（各自独立，互不挤压）
         var top = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            FlowDirection = FlowDirection.LeftToRight,
+            FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
@@ -620,12 +620,12 @@ internal class GameChooser : Form
             Text = caption ?? " 搜索到多个匹配，请选择：",
             AutoSize = true,
             ForeColor = Theme.Sub,
-            Margin = new Padding(0, 9, 10, 0),
+            Margin = new Padding(0, 2, 0, 2),
         };
-        txtFilter.Width = 220;
-        txtFilter.PlaceholderText = "过滤 AppID；输名字按回车联网搜";
+        txtFilter.Width = 320;
+        txtFilter.PlaceholderText = "过滤 AppID；输游戏名按回车联网搜";
         txtFilter.BackColor = Theme.Input; txtFilter.ForeColor = Theme.Text; txtFilter.BorderStyle = BorderStyle.FixedSingle;
-        txtFilter.Margin = new Padding(0, 4, 0, 0);
+        txtFilter.Margin = new Padding(0, 4, 0, 2);
         txtFilter.TextChanged += (_, _) => ApplyFilter();
         txtFilter.KeyDown += async (_, e) =>
         {
@@ -1322,11 +1322,12 @@ internal class CollectorDialog : Form
         try
         {
             var owned = await extractor.GetOwnedAppsAsync(CancellationToken.None, ExtractLog());
+            var names = await Store.FetchAllAppNamesAsync(store.ProxyEff, ExtractLog());
             var games = owned.OrderBy(id => id)
-                .Select(id => ((long)id, store.Records.TryGetValue(id, out var r) ? (r.Name ?? r.FetchedName) ?? "(未登记名)" : "(未登记名)"))
+                .Select(id => ((long)id, names.TryGetValue((uint)id, out var n) && !string.IsNullOrEmpty(n) ? n : "(未登记名)"))
                 .ToList();
             if (games.Count == 0) { AppendLog("已拥有列表为空。", Theme.Yellow); return; }
-            using var chooser = new GameChooser(games, $"选择要提取的游戏：", store);
+            using var chooser = new GameChooser(games, "选择要提取的游戏：", store);
             if (chooser.ShowDialog(this) == DialogResult.OK)
                 await RunExtractAsync(chooser.PickId);
         }

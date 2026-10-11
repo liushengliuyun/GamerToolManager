@@ -144,6 +144,100 @@ public partial class Store
         }
         catch { return false; }
     }
+
+    // ---------- Steam 全量游戏名表（已拥有列表展示用） ----------
+    private static Dictionary<uint, string> appListCache;
+    private static DateTime appListAt = DateTime.MinValue;
+    private static string AppListPath => Path.Combine(AppDir, "applist.json");
+
+    /// <summary>
+    /// Steam 官方 ISteamApps/GetAppList：一次请求拿全平台 AppID→名称。
+    /// 内存 + 磁盘缓存 30 天（applist.json），仅含公开名称、不含任何凭据。
+    /// </summary>
+    public static async Task<Dictionary<uint, string>> FetchAllAppNamesAsync(string proxy, Action<string, LogKind> log = null)
+    {
+        if (appListCache != null && (DateTime.Now - appListAt).TotalMinutes < 10) return appListCache;
+
+        // 磁盘缓存（30 天内有效）
+        try
+        {
+            if (File.Exists(AppListPath))
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(AppListPath));
+                var root = doc.RootElement;
+                if (root.TryGetProperty("fetchedAt", out var fa) &&
+                    root.TryGetProperty("names", out var namesEl) &&
+                    DateTime.TryParse(fa.GetString(), out var at) &&
+                    (DateTime.Now - at).TotalDays < 30)
+                {
+                    appListCache = new Dictionary<uint, string>();
+                    foreach (var p in namesEl.EnumerateObject())
+                        if (uint.TryParse(p.Name, out var id))
+                            appListCache[id] = p.Value.GetString() ?? "";
+                    appListAt = DateTime.Now;
+                    log?.Invoke($"✓ 游戏名表读自本地缓存（{appListCache.Count} 项）。", LogKind.Tool);
+                    return appListCache;
+                }
+            }
+        }
+        catch { }
+
+        log?.Invoke("正在下载 Steam 全量游戏名表（首次约 10-30MB，之后 30 天内走本地缓存）…", LogKind.Info);
+        const string url = "https://api.steampowered.com/ISteamApps/GetAppList/v2/";
+        string json = null;
+        try
+        {
+            using var resp = await HcDirect.GetAsync(url);
+            if (resp.IsSuccessStatusCode) json = await resp.Content.ReadAsStringAsync();
+        }
+        catch { }
+        if (json == null && !string.IsNullOrWhiteSpace(proxy))
+        {
+            try
+            {
+                using var resp = await ProxyClient(proxy).GetAsync(url);
+                if (resp.IsSuccessStatusCode) json = await resp.Content.ReadAsStringAsync();
+            }
+            catch { }
+        }
+        if (json == null) throw new HttpRequestException("无法下载 Steam 游戏名表（直连与代理均失败），可稍后再试。");
+
+        using (var doc = JsonDocument.Parse(json))
+        {
+            var list = doc.RootElement.GetProperty("applist").GetProperty("apps");
+            appListCache = new Dictionary<uint, string>(list.GetArrayLength());
+            foreach (var a in list.EnumerateArray())
+            {
+                if (a.TryGetProperty("appid", out var idEl) && a.TryGetProperty("name", out var nEl))
+                {
+                    uint id = idEl.GetUInt32();
+                    string n = nEl.GetString();
+                    if (id > 0 && !string.IsNullOrEmpty(n)) appListCache[id] = n;
+                }
+            }
+        }
+        appListAt = DateTime.Now;
+
+        try
+        {
+            var sb = new System.Text.StringBuilder(appListCache.Count * 32);
+            sb.Append("{\"fetchedAt\":\"").Append(DateTime.Now.ToString("s")).Append("\",\"names\":{");
+            bool first = true;
+            foreach (var kv in appListCache)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append('"').Append(kv.Key).Append("\":").Append(JsonSerializer.Serialize(kv.Value));
+            }
+            sb.Append("}}");
+            Directory.CreateDirectory(AppDir);
+            File.WriteAllText(AppListPath, sb.ToString());
+        }
+        catch { }
+
+        log?.Invoke($"✓ 名表就绪（{appListCache.Count} 项）。", LogKind.Ok);
+        return appListCache;
+    }
 }
 
 // ---------------- 持久化的游戏备注记录 ----------------
