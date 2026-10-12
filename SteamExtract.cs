@@ -560,7 +560,7 @@ internal sealed class SteamExtractor : IDisposable
                     if (lastEx != null) throw new InvalidOperationException("所有 CDN 服务器均失败: " + lastEx.Message);
                 }
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 failed.Add(depotId);

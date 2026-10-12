@@ -1574,7 +1574,8 @@ internal class CollectorDialog : Form
                     conflict++;
                     AppendLog("  ⚠ 分支在期间被他人更新，跳过（稍后重跑会补上差异）。", Theme.Yellow);
                 }
-                catch (OperationCanceledException) { throw; }
+                // 只有【停止】按钮触发的取消才向上抛；网络超时的 TaskCanceledException 按普通失败记账并继续
+                catch (OperationCanceledException) when (cts.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
                     fail++;
@@ -1604,6 +1605,12 @@ internal class CollectorDialog : Form
             store.SaveRecords();
             ScanDir();
             AppendLog("已手动取消：已提取的清单已落盘，再次一键收集会自动续传（已有分支与已传文件跳过）。", Theme.Yellow);
+        }
+        catch (Exception ex)
+        {
+            store.SaveRecords();
+            ScanDir();
+            AppendLog("✕ 一键收集异常终止（可重跑续传）: " + ex.Message, Theme.Red);
         }
         finally
         {
