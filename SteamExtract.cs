@@ -340,6 +340,50 @@ internal sealed class SteamExtractor : IDisposable
         return set;
     }
 
+    // ---------- 已拥有游戏（批量信息） ----------
+    /// <summary>一键收集用：已拥有应用的信息（类型/名称）。PICS 未返回的应用不会出现在结果里。</summary>
+    public sealed class OwnedGameInfo
+    {
+        public uint AppId;
+        public string Name;
+        public string Type;
+    }
+
+    /// <summary>已拥有应用信息批查询：分批取访问令牌+应用信息，一键收集据此过滤出「游戏类」。</summary>
+    public async Task<List<OwnedGameInfo>> GetOwnedGameInfosAsync(CancellationToken ct, Action<string, LogKind> log = null)
+    {
+        var owned = await GetOwnedAppsAsync(ct, log).ConfigureAwait(false);
+        if (owned.Count == 0) return new List<OwnedGameInfo>();
+
+        log?.Invoke($"正在分批获取 {owned.Count} 个已拥有应用的信息…", LogKind.Tool);
+        var byId = new Dictionary<uint, OwnedGameInfo>();
+        foreach (var chunk in owned.Chunk(50))
+        {
+            ct.ThrowIfCancellationRequested();
+            // 先取访问令牌（每批一个请求），再带令牌批量取应用信息 —— 未带令牌的 appinfo 可能拿不到
+            var tokens = await steamApps.PICSGetAccessTokens(chunk, null);
+            var appTokens = tokens?.AppTokens ?? new Dictionary<uint, ulong>();
+            var reqs = chunk.Select(id => new SteamApps.PICSRequest(id, appTokens.TryGetValue(id, out var t) ? t : 0)).ToList();
+            var rs = await steamApps.PICSGetProductInfo(reqs, new List<SteamApps.PICSRequest>(), false);
+            if (rs.Failed) continue; // 整批失败不致命：这些应用落入「未知」被跳过
+            foreach (var res in rs.Results)
+            {
+                if (res.Apps == null) continue;   // ResponsePending 回调不带数据
+                foreach (var (id, info) in res.Apps)
+                {
+                    if (info.KeyValues == null || info.KeyValues.Children.Count == 0) continue;
+                    byId[id] = new OwnedGameInfo
+                    {
+                        AppId = id,
+                        Name = info.KeyValues["common"]["name"].AsString(),
+                        Type = info.KeyValues["common"]["type"].AsString(),
+                    };
+                }
+            }
+        }
+        return byId.Values.ToList();
+    }
+
     // ---------- 提取 ----------
     public sealed class ExtractResult
     {

@@ -143,6 +143,22 @@ internal static class Collector
     }
 
     // ---------- 批前检 ----------
+    /// <summary>收集仓库现有的 AppID 分支集合（分页拉全）。一键收集用它实现「仓库已有的跳过」。</summary>
+    public static async Task<HashSet<long>> GetBranchesAsync(string proxy)
+    {
+        var set = new HashSet<long>();
+        for (int page = 1; ; page++)
+        {
+            var arr = await SendJson("GET", $"https://api.github.com/repos/{RepoSlug}/branches?per_page=100&page={page}", null, proxy);
+            if (arr.ValueKind != JsonValueKind.Array || arr.GetArrayLength() == 0) break;
+            foreach (var b in arr.EnumerateArray())
+                if (b.TryGetProperty("name", out var n) && long.TryParse(n.GetString(), out var id))
+                    set.Add(id);
+            if (arr.GetArrayLength() < 100) break;
+        }
+        return set;
+    }
+
     /// <summary>上传前一次性校验令牌与仓库可达；空仓库自动补初始化提交（GitHub 无法在空仓库上建 Git 树/孤儿分支，409）。</summary>
     public static async Task EnsureRepoAsync(string proxy)
     {
@@ -259,7 +275,7 @@ internal static class Collector
         return null;
     }
 
-    static CollectSet MakeSet(string dir, long appId, string displayName, Store store = null)
+    internal static CollectSet MakeSet(string dir, long appId, string displayName, Store store = null)
     {
         var set = new CollectSet { Dir = dir, AppId = appId, Recognized = appId > 0, DisplayName = displayName };
         foreach (var f in SafeFiles(dir))

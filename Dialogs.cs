@@ -843,6 +843,7 @@ internal class CollectorDialog : Form
     private readonly Button btnStop = new() { Text = "停止", Enabled = false };
     private readonly Button btnExtract = new() { Text = "从 Steam 提取" };
     private readonly Button btnOwned = new() { Text = "从已拥有列表选" };
+    private readonly Button btnCollectAll = new() { Text = "⚡ 一键收集全部" };
     private readonly Button btnSteam = new() { Text = "登录 Steam" };
 
     // Steam 登录行（未登录且需要登录时显示；不用 GroupBox，避免 AutoSize 裁切）
@@ -946,9 +947,12 @@ internal class CollectorDialog : Form
         btnExtract.Margin = new Padding(0, 3, 8, 0);
         btnExtract.Click += async (_, _) => await ExtractAsync();
         AutoSizeBtn(btnOwned);
-        btnOwned.Margin = new Padding(0, 3, 0, 0);
+        btnOwned.Margin = new Padding(0, 3, 8, 0);
         btnOwned.Click += async (_, _) => await ChooseOwnedAsync();
-        row2.Controls.AddRange(new Control[] { lblSteam, btnSteam, btnExtract, btnOwned });
+        AutoSizeBtn(btnCollectAll, true);
+        btnCollectAll.Margin = new Padding(0, 3, 0, 0);
+        btnCollectAll.Click += async (_, _) => await CollectAllAsync();
+        row2.Controls.AddRange(new Control[] { lblSteam, btnSteam, btnExtract, btnOwned, btnCollectAll });
 
         // Steam 登录行（未登录且点「登录 Steam」/需要登录时展开）
         rowLogin.FlowDirection = FlowDirection.LeftToRight;
@@ -1242,7 +1246,7 @@ internal class CollectorDialog : Form
     void SetBusy(bool on)
     {
         busy = on;
-        btnScan.Enabled = btnUpload.Enabled = btnExtract.Enabled = btnOwned.Enabled =
+        btnScan.Enabled = btnUpload.Enabled = btnExtract.Enabled = btnOwned.Enabled = btnCollectAll.Enabled =
         btnSteam.Enabled = btnDoLogin.Enabled = txtUser.Enabled = txtPass.Enabled = txtDir.Enabled = !on;
         btnStop.Enabled = on;
     }
@@ -1472,6 +1476,123 @@ internal class CollectorDialog : Form
         }
         catch (Exception ex) { AppendLog("✕ 获取已拥有列表失败: " + ex.Message, Theme.Red); }
         finally { SetBusy(false); }
+    }
+
+    // ---------- 一键收集全部（拥有 ∧ 游戏类 ∧ 仓库没有 → 提取 + 上传） ----------
+    async Task CollectAllAsync()
+    {
+        if (busy) return;
+        if (Collector.UploadToken == "")
+        {
+            MessageBox.Show(this,
+                "当前构建没有内置上传令牌，无法上传收集库。\n\n维护者按 Secrets.cs.example 配好令牌重新编译后，此功能即可用。",
+                "一键收集", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (!extractor.IsLoggedOn)
+        {
+            rowLogin.Tag = "open";
+            UpdateSteamUi();
+            AppendLog("⚠ 一键收集需要先登录 Steam（上方输入账号密码），登录后再点一次。", Theme.Yellow);
+            return;
+        }
+        if (MessageBox.Show(this,
+                "将自动遍历当前 Steam 账号拥有的全部游戏：\n\n" +
+                "· 仓库已收录的 AppID 直接跳过\n" +
+                $"· 逐个从 Steam 提取清单+密钥 → 上传 {Collector.RepoSlug}\n" +
+                "· 全程只生成/上传清单，不部署、不动 Steam\n" +
+                "· 游戏多时耗时较长，可随时【停止】\n\n继续？",
+                "一键收集全部", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+
+        SetBusy(true);
+        cts = new CancellationTokenSource();
+        int success = 0, latest = 0, conflict = 0, fail = 0;
+        try
+        {
+            AppendLog($"== 一键收集全部 → {Collector.RepoSlug}", Theme.Accent);
+
+            // 1) 仓库分支快照 ——「仓库已有的跳过」
+            await Collector.EnsureRepoAsync(store.ProxyEff);
+            AppendLog("✓ 令牌与仓库校验通过。", Theme.Green);
+            var repoBranches = await Collector.GetBranchesAsync(store.ProxyEff);
+            AppendLog($"✓ 仓库已有 {repoBranches.Count} 个 AppID 分支（这些将跳过）。", Theme.Green);
+
+            // 2) 已拥有列表 + 应用信息（类型过滤）
+            var owned = await extractor.GetOwnedAppsAsync(cts.Token, ExtractLog());
+            var infos = await extractor.GetOwnedGameInfosAsync(cts.Token, ExtractLog());
+            var games = infos.Where(i => string.Equals(i.Type, "game", StringComparison.OrdinalIgnoreCase)).ToList();
+            int unknown = owned.Count - infos.Count;
+            int nonGame = infos.Count - games.Count;
+            AppendLog($"✓ 已拥有 {owned.Count} 个应用：游戏类 {games.Count}，非游戏（DLC/工具/视频等）{nonGame}，未知 {unknown}。", Theme.Green);
+
+            // 3) 逐个：提取 → 上传（增量提交，冲突不覆盖）
+            var toDo = games.Where(g => !repoBranches.Contains(g.AppId)).OrderBy(g => g.AppId).ToList();
+            AppendLog($"== 开始处理 {toDo.Count} 个未收录游戏 …", Theme.Accent);
+            int idx = 0;
+            foreach (var g in toDo)
+            {
+                idx++;
+                cts.Token.ThrowIfCancellationRequested();
+                AppendLog($"——（{idx}/{toDo.Count}）{g.AppId} {g.Name}", Theme.Accent);
+                try
+                {
+                    var r = await extractor.ExtractAsync(g.AppId, store.S.GamerToolDir, cts.Token, ExtractLog());
+                    var set = Collector.MakeSet(r.Dir, g.AppId, r.Name, store);
+                    var ur = await Collector.UploadSetAsync(store, set, t => AppendLog("  " + t, Theme.ToolC), cts.Token);
+                    if (ur.Skipped) { latest++; AppendLog("  = 远端已是最新，跳过提交。", Theme.Sub); }
+                    else { AppendLog($"  ✓ 已上传（{ur.CommitSha}，{ur.UploadedFiles} 个文件）", Theme.Green); success++; }
+                    // 名字落盘 games.json：已拥有选择器与收集扫描以后显示真名
+                    if (!store.Records.TryGetValue(g.AppId, out var rec))
+                        store.Records[g.AppId] = rec = new GameRecord { AppId = g.AppId };
+                    if (!string.IsNullOrWhiteSpace(r.Name)) rec.FetchedName ??= r.Name;
+                }
+                catch (Collector.ApiException aex) when (aex.Status == 401 || aex.Status == 403)
+                {
+                    AppendLog("✕ " + aex.Message + " 中止整批。", Theme.Red);
+                    break;
+                }
+                catch (Collector.ApiException aex) when (aex.Status == 422)
+                {
+                    conflict++;
+                    AppendLog("  ⚠ 分支在期间被他人更新，跳过（稍后重跑会补上差异）。", Theme.Yellow);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    fail++;
+                    AppendLog($"  ✕ {g.AppId} 失败: {ex.Message}", Theme.Red);
+                }
+            }
+
+            // 4) 收尾：名字落盘 + 重扫网格 + 汇总
+            store.SaveRecords();
+            ScanDir();
+            int processed = success + latest + conflict + fail;
+            AppendLog($"== 一键收集结束: 处理 {processed}/{toDo.Count}，成功 {success}，已是最新 {latest}，冲突 {conflict}，失败 {fail}。", Theme.Accent);
+            MessageBox.Show(this,
+                $"一键收集完成。\n\n" +
+                $"处理 {processed} 个：成功 {success}，已是最新 {latest}，冲突 {conflict}，失败 {fail}\n" +
+                $"（仓库已有 {repoBranches.Count} 个直接跳过，非游戏/未知 {nonGame + unknown} 个未处理）",
+                "一键收集", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (NeedsLoginException)
+        {
+            rowLogin.Tag = "open";
+            try { BeginInvoke(() => UpdateSteamUi()); } catch { }
+            AppendLog("⚠ 需要先登录 Steam（在上方输入账号密码），登录后再点一次【⚡ 一键收集全部】。", Theme.Yellow);
+        }
+        catch (OperationCanceledException)
+        {
+            store.SaveRecords();
+            ScanDir();
+            AppendLog("已手动取消：已提取的清单已落盘，再次一键收集会自动续传（已有分支与已传文件跳过）。", Theme.Yellow);
+        }
+        finally
+        {
+            SetBusy(false);
+            OnUploadDone?.Invoke(success, conflict + fail);
+        }
     }
 
 }
