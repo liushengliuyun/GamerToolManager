@@ -1232,6 +1232,13 @@ internal class CollectorDialog : Form
         catch { }
     }
 
+    /// <summary>线程安全的日志（一键收集并发跑时从后台线程投递到 UI）。</summary>
+    void Ui(string text, Color c)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        try { BeginInvoke(() => AppendLog(text, c)); } catch { }
+    }
+
     Action<string, LogKind> ExtractLog() => (t, k) =>
     {
         var c = k switch
@@ -1525,6 +1532,7 @@ internal class CollectorDialog : Form
         SetBusy(true);
         cts = new CancellationTokenSource();
         int success = 0, latest = 0, conflict = 0, fail = 0;
+        string abortReason = null;   // 401/403 中止整批时的真实原因（区别于手动取消）
         try
         {
             AppendLog($"== 一键收集全部 → {Collector.RepoSlug}", Theme.Accent);
@@ -1557,42 +1565,53 @@ internal class CollectorDialog : Form
                 else fresh++;
             }
             AppendLog($"== 开始处理 {toDo.Count} 个游戏（未收录或一年未更新），一年内有更新跳过 {fresh} 个 …", Theme.Accent);
-            int idx = 0;
-            foreach (var g in toDo)
+            // 3c) 并发 3 路提取+上传（每游戏多次网络往返，串行太慢；游戏间不共享分支/文件夹，安全）
+            int total = toDo.Count, done = 0;
+            var sem = new SemaphoreSlim(3);
+            var tasks = toDo.Select(g => Task.Run(async () =>
             {
-                idx++;
-                cts.Token.ThrowIfCancellationRequested();
-                AppendLog($"——（{idx}/{toDo.Count}）{g.AppId} {g.Name}", Theme.Accent);
+                await sem.WaitAsync(cts.Token);
                 try
                 {
-                    var r = await extractor.ExtractAsync(g.AppId, store.S.GamerToolDir, cts.Token, ExtractLog());
-                    var set = Collector.MakeSet(r.Dir, g.AppId, r.Name, store);
-                    var ur = await Collector.UploadSetAsync(store, set, t => AppendLog("  " + t, Theme.ToolC), cts.Token);
-                    if (ur.Skipped) { latest++; AppendLog("  = 远端已是最新，跳过提交。", Theme.Sub); }
-                    else { AppendLog($"  ✓ 已上传（{ur.CommitSha}，{ur.UploadedFiles} 个文件）", Theme.Green); success++; }
-                    // 名字落盘 games.json：已拥有选择器与收集扫描以后显示真名
-                    if (!store.Records.TryGetValue(g.AppId, out var rec))
-                        store.Records[g.AppId] = rec = new GameRecord { AppId = g.AppId };
-                    if (!string.IsNullOrWhiteSpace(r.Name)) rec.FetchedName ??= r.Name;
+                    int n = Interlocked.Increment(ref done);
+                    Ui($"——（{n}/{total}）{g.AppId} {g.Name}", Theme.Accent);
+                    try
+                    {
+                        var r = await extractor.ExtractAsync(g.AppId, store.S.GamerToolDir, cts.Token, ExtractLog());
+                        var set = Collector.MakeSet(r.Dir, g.AppId, r.Name, store);
+                        var ur = await Collector.UploadSetAsync(store, set, t => Ui("  " + t, Theme.ToolC), cts.Token);
+                        if (ur.Skipped) { Interlocked.Increment(ref latest); Ui("  = 远端已是最新，跳过提交。", Theme.Sub); }
+                        else { Interlocked.Increment(ref success); Ui($"  ✓ 已上传（{ur.CommitSha}，{ur.UploadedFiles} 个文件）", Theme.Green); }
+                        // 名字落盘 games.json（并发写需加锁）
+                        lock (store.Records)
+                        {
+                            if (!store.Records.TryGetValue(g.AppId, out var rec))
+                                store.Records[g.AppId] = rec = new GameRecord { AppId = g.AppId };
+                            if (!string.IsNullOrWhiteSpace(r.Name)) rec.FetchedName ??= r.Name;
+                        }
+                    }
+                    catch (Collector.ApiException aex) when (aex.Status == 401 || aex.Status == 403)
+                    {
+                        abortReason = "✕ " + aex.Message + " 中止整批（在途任务收尾后停）。";
+                        Ui(abortReason, Theme.Red);
+                        cts.Cancel(); // 停止派发新游戏；在途的自行收尾
+                    }
+                    catch (Collector.ApiException aex) when (aex.Status == 422)
+                    {
+                        Interlocked.Increment(ref conflict);
+                        Ui("  ⚠ 分支在期间被他人更新，跳过（稍后重跑会补上差异）。", Theme.Yellow);
+                    }
+                    // 只有【停止】触发的取消才向上抛；网络超时的 TaskCanceledException 按普通失败记账并继续
+                    catch (OperationCanceledException) when (cts.IsCancellationRequested) { throw; }
+                    catch (Exception ex)
+                    {
+                        Interlocked.Increment(ref fail);
+                        Ui($"  ✕ {g.AppId} 失败: {ex.Message}", Theme.Red);
+                    }
                 }
-                catch (Collector.ApiException aex) when (aex.Status == 401 || aex.Status == 403)
-                {
-                    AppendLog("✕ " + aex.Message + " 中止整批。", Theme.Red);
-                    break;
-                }
-                catch (Collector.ApiException aex) when (aex.Status == 422)
-                {
-                    conflict++;
-                    AppendLog("  ⚠ 分支在期间被他人更新，跳过（稍后重跑会补上差异）。", Theme.Yellow);
-                }
-                // 只有【停止】按钮触发的取消才向上抛；网络超时的 TaskCanceledException 按普通失败记账并继续
-                catch (OperationCanceledException) when (cts.IsCancellationRequested) { throw; }
-                catch (Exception ex)
-                {
-                    fail++;
-                    AppendLog($"  ✕ {g.AppId} 失败: {ex.Message}", Theme.Red);
-                }
-            }
+                finally { sem.Release(); }
+            })).ToList();
+            await Task.WhenAll(tasks);
 
             // 4) 收尾：名字落盘 + 重扫网格 + 汇总
             store.SaveRecords();
@@ -1615,7 +1634,8 @@ internal class CollectorDialog : Form
         {
             store.SaveRecords();
             ScanDir();
-            AppendLog("已手动取消：已提取的清单已落盘，再次一键收集会自动续传（已有分支与已传文件跳过）。", Theme.Yellow);
+            AppendLog(abortReason ?? "已手动取消：已提取的清单已落盘，再次一键收集会自动续传（已有分支与已传文件跳过）。",
+                abortReason == null ? Theme.Yellow : Theme.Red);
         }
         catch (Exception ex)
         {
