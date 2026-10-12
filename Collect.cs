@@ -106,7 +106,7 @@ internal static class Collector
         public ApiException(int status, string message) : base(message) { Status = status; }
     }
 
-    static async Task<JsonElement> SendJson(string method, string url, object body, string proxy)
+    static async Task<JsonElement> SendJson(string method, string url, object body, string proxy, bool isRetry = false)
     {
         using var msg = new HttpRequestMessage(new HttpMethod(method), url);
         if (body != null)
@@ -117,6 +117,14 @@ internal static class Collector
         using var resp = await SendSmart(msg, proxy);
         string text = null;
         try { text = await resp.Content.ReadAsStringAsync(); } catch { }
+
+        // 偶发瞬时 401（令牌实测有效但 GitHub 瞬时返回 Bad credentials，2026-10-12 一天两次中止整批）：
+        // 等 3 秒重试一次，仍 401 才按令牌失效处理
+        if ((int)resp.StatusCode == 401 && !isRetry)
+        {
+            await Task.Delay(3000);
+            return await SendJson(method, url, body, proxy, true);
+        }
 
         if ((int)resp.StatusCode >= 400)
         {
