@@ -1515,7 +1515,7 @@ internal class CollectorDialog : Form
         }
         if (MessageBox.Show(this,
                 "将自动遍历当前 Steam 账号拥有的全部游戏：\n\n" +
-                "· 仓库已收录的 AppID 直接跳过\n" +
+                "· 已收录且一年内有更新的 AppID 跳过；一年未更新的重新收集更新\n" +
                 $"· 逐个从 Steam 提取清单+密钥 → 上传 {Collector.RepoSlug}\n" +
                 "· 全程只生成/上传清单，不部署、不动 Steam\n" +
                 "· 游戏多时耗时较长，可随时【停止】\n\n继续？",
@@ -1533,7 +1533,7 @@ internal class CollectorDialog : Form
             await Collector.EnsureRepoAsync(store.ProxyEff);
             AppendLog("✓ 令牌与仓库校验通过。", Theme.Green);
             var repoBranches = await Collector.GetBranchesAsync(store.ProxyEff);
-            AppendLog($"✓ 仓库已有 {repoBranches.Count} 个 AppID 分支（这些将跳过）。", Theme.Green);
+            AppendLog($"✓ 仓库已有 {repoBranches.Count} 个 AppID 分支（一年内有更新的跳过，一年未更新的重新收集）。", Theme.Green);
 
             // 2) 已拥有列表 + 应用信息（类型过滤）
             var owned = await extractor.GetOwnedAppsAsync(cts.Token, ExtractLog());
@@ -1543,9 +1543,20 @@ internal class CollectorDialog : Form
             int nonGame = infos.Count - games.Count;
             AppendLog($"✓ 已拥有 {owned.Count} 个应用：游戏类 {games.Count}，非游戏（DLC/工具/视频等）{nonGame}，未知 {unknown}。", Theme.Green);
 
-            // 3) 逐个：提取 → 上传（增量提交，冲突不覆盖）
-            var toDo = games.Where(g => !repoBranches.Contains(g.AppId)).OrderBy(g => g.AppId).ToList();
-            AppendLog($"== 开始处理 {toDo.Count} 个未收录游戏 …", Theme.Accent);
+            // 3) 逐个：提取 → 上传（增量提交，冲突不覆盖）。
+            //    收录规则：分支不存在 → 收集；分支存在但一年没更新 → 重新收集更新；一年内有更新 → 跳过
+            AppendLog("检查已有分支的最后更新时间…", Theme.ToolC);
+            var toDo = new List<SteamExtractor.OwnedGameInfo>();
+            int fresh = 0;
+            foreach (var g in games.OrderBy(g => g.AppId))
+            {
+                cts.Token.ThrowIfCancellationRequested();
+                if (!repoBranches.Contains(g.AppId)) { toDo.Add(g); continue; }
+                var tip = await Collector.GetBranchTipDateAsync(g.AppId, store.ProxyEff);
+                if (tip == null || (DateTime.UtcNow - tip.Value).TotalDays >= 365) toDo.Add(g);
+                else fresh++;
+            }
+            AppendLog($"== 开始处理 {toDo.Count} 个游戏（未收录或一年未更新），一年内有更新跳过 {fresh} 个 …", Theme.Accent);
             int idx = 0;
             foreach (var g in toDo)
             {
@@ -1591,7 +1602,7 @@ internal class CollectorDialog : Form
             MessageBox.Show(this,
                 $"一键收集完成。\n\n" +
                 $"处理 {processed} 个：成功 {success}，已是最新 {latest}，冲突 {conflict}，失败 {fail}\n" +
-                $"（仓库已有 {repoBranches.Count} 个直接跳过，非游戏/未知 {nonGame + unknown} 个未处理）",
+                $"（一年内有更新跳过 {fresh} 个，非游戏/未知 {nonGame + unknown} 个未处理）",
                 "一键收集", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (NeedsLoginException)

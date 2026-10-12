@@ -159,6 +159,25 @@ internal static class Collector
         return set;
     }
 
+    /// <summary>分支最后一次提交时间（UTC）；分支不存在返回 null，网络/限流错误抛 ApiException。</summary>
+    public static async Task<DateTime?> GetBranchTipDateAsync(long appId, string proxy)
+    {
+        try
+        {
+            var c = await SendJson("GET", $"https://api.github.com/repos/{RepoSlug}/commits/{appId}", null, proxy);
+            string date = null;
+            if (c.TryGetProperty("commit", out var cm) &&
+                cm.TryGetProperty("committer", out var co) &&
+                co.TryGetProperty("date", out var d))
+                date = d.GetString();
+            if (date != null && DateTime.TryParse(date, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var t))
+                return t;
+            return null;
+        }
+        catch (ApiException ex) when (ex.Status == 404) { return null; }
+    }
+
     /// <summary>上传前一次性校验令牌与仓库可达；空仓库自动补初始化提交（GitHub 无法在空仓库上建 Git 树/孤儿分支，409）。</summary>
     public static async Task EnsureRepoAsync(string proxy)
     {
