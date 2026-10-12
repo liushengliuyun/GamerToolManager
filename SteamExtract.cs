@@ -262,11 +262,13 @@ internal sealed class SteamExtractor : IDisposable
             return;
         }
 
-        // 令牌类失败 → 清凭据要求重新登录；限速单独提示
+        // 限流是暂时性失败，不清凭据（否则一次限流就把保存的登录抹掉）；其余失败才清除
+        if (cb.Result == EResult.AccountLoginDeniedThrottle)
+            throw new InvalidOperationException("登录尝试过于频繁（凭据已保留），请几分钟后再试。");
+
+        // 令牌类失败 → 清凭据要求重新登录
         SteamAuthStore.Delete();
         savedAuth = null;
-        if (cb.Result == EResult.AccountLoginDeniedThrottle)
-            throw new InvalidOperationException("登录尝试过于频繁，请几分钟后再试。");
         if (cb.Result != EResult.InvalidPassword)
             log?.Invoke($"⚠ Steam 返回 {cb.Result}，已清除本机凭据，需要重新登录。", LogKind.Warn);
         IsLoggedOn = false;

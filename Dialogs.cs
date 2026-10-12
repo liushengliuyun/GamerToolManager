@@ -1493,10 +1493,25 @@ internal class CollectorDialog : Form
         }
         if (!extractor.IsLoggedOn)
         {
-            rowLogin.Tag = "open";
-            UpdateSteamUi();
-            AppendLog("⚠ 一键收集需要先登录 Steam（上方输入账号密码），登录后再点一次。", Theme.Yellow);
-            return;
+            // IsLoggedOn 只是内存状态（重启即失）——盘上有凭据就先静默续登，失败才引导登录
+            try
+            {
+                SetBusy(true);
+                try { await extractor.EnsureLoggedOnAsync(CancellationToken.None, ExtractLog()); }
+                finally { SetBusy(false); }
+            }
+            catch (NeedsLoginException)
+            {
+                rowLogin.Tag = "open";
+                UpdateSteamUi();
+                AppendLog("⚠ 一键收集需要先登录 Steam（上方输入账号密码），登录后再点一次。", Theme.Yellow);
+                return;
+            }
+            catch (Exception ex)
+            {
+                AppendLog("✕ Steam 自动登录失败（凭据已保留，可稍后重试）: " + ex.Message, Theme.Yellow);
+                return;
+            }
         }
         if (MessageBox.Show(this,
                 "将自动遍历当前 Steam 账号拥有的全部游戏：\n\n" +
