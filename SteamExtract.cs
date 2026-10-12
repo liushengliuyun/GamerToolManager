@@ -360,8 +360,9 @@ internal sealed class SteamExtractor : IDisposable
         foreach (var chunk in owned.Chunk(50))
         {
             ct.ThrowIfCancellationRequested();
-            // 先取访问令牌（每批一个请求），再带令牌批量取应用信息 —— 未带令牌的 appinfo 可能拿不到
-            var tokens = await steamApps.PICSGetAccessTokens(chunk, null);
+            // 先取访问令牌（每批一个请求），再带令牌批量取应用信息
+            // 注意：SteamKit 批量重载不判空（AddRange(null) 会炸），空集合必须传空数组不传 null
+            var tokens = await steamApps.PICSGetAccessTokens(chunk, Array.Empty<uint>());
             var appTokens = tokens?.AppTokens ?? new Dictionary<uint, ulong>();
             var reqs = chunk.Select(id => new SteamApps.PICSRequest(id, appTokens.TryGetValue(id, out var t) ? t : 0)).ToList();
             var rs = await steamApps.PICSGetProductInfo(reqs, new List<SteamApps.PICSRequest>(), false);

@@ -470,12 +470,14 @@ internal class OrphanDialog : Form
         {
             Dock = DockStyle.Top,
             AutoSize = true,
-            MaximumSize = new Size(500, 0),
+            // 宽度跟随窗口但封顶 560：窄窗不裁字，宽窗文字列不无限拉长；
+            // 背景与窗体同色，避免 Dock 色带在右侧留断层
+            MaximumSize = new Size(560, 0),
+            BackColor = Theme.Back,
             Text = "以下 AppID 登记在 SteamTools 的 appids.db 中，但没有任何解锁 Lua 覆盖它们，\n" +
                    "通常是 Lua 已被删除后的残留。勾选要清理的项（默认全选），点击清理。\n" +
                    "注意：如果这些是你仍需要的功能（如悬浮窗登记的解密 Key），请不要清理。",
             ForeColor = Theme.Sub,
-            BackColor = Theme.Panel,
             Padding = new Padding(10, 8, 10, 0),
         };
 
