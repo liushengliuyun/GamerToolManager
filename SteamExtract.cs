@@ -434,24 +434,65 @@ internal sealed class SteamExtractor : IDisposable
         string name = kv["common"]["name"].AsString();
         if (string.IsNullOrWhiteSpace(name)) name = appid.ToString();
 
-        // 3) 解析 depot 清单（跳过共享 depot 与无 public 清单的空 depot）
-        var depots = new List<(uint depotId, ulong gid)>();
+        // 3) 解析 depot 清单（数字键才是 depot；共享 depot 单独收集，向属主 app 解析）
+        var depots = new List<(uint depotId, ulong gid, uint ownerApp)>();
+        var sharedDepots = new List<(uint depotId, uint ownerApp)>();
         foreach (var d in kv["depots"].Children)
         {
             if (d.Name == null || !uint.TryParse(d.Name, out var depotId)) continue;         // 跳过 branches 等非数字键
-            if (!string.IsNullOrEmpty(d["depotfromapp"].AsString()))                          // 共享 depot（属别的 app）
+            string fromApp = d["depotfromapp"].AsString();
+            if (!string.IsNullOrEmpty(fromApp))                                              // 共享 depot（属别的 app）
             {
-                log?.Invoke($"  depot {d.Name} 为共享内容（depotfromapp），v1 跳过。", LogKind.Warn);
+                if (uint.TryParse(fromApp, out var owner) && owner != (uint)appid)
+                    sharedDepots.Add((depotId, owner));
+                else
+                    log?.Invoke($"  depot {d.Name} 为共享内容且属主不可解析（{fromApp}），跳过。", LogKind.Warn);
                 continue;
             }
             string gid = d["manifests"]["public"]["gid"].AsString();
             if (string.IsNullOrEmpty(gid) || !ulong.TryParse(gid, out var manifestGid))
                 continue;                                                                     // 空 Depot / 无公开清单
-            depots.Add((depotId, manifestGid));
+            depots.Add((depotId, manifestGid, (uint)appid));
         }
+
+        // 3b) 共享 depot：清单 gid 在属主应用的 appinfo 里，密钥/CDN 授权也按属主身份取
+        foreach (var g in sharedDepots.GroupBy(s => s.ownerApp))
+        {
+            ct.ThrowIfCancellationRequested();
+            log?.Invoke($"解析共享 depot（属主 app {g.Key}）…", LogKind.Tool);
+            try
+            {
+                var ownTokens = await steamApps.PICSGetAccessTokens(new[] { g.Key }, Array.Empty<uint>());
+                ulong ownAt = 0;
+                if (ownTokens?.AppTokens != null) ownTokens.AppTokens.TryGetValue(g.Key, out ownAt);
+                var ownRs = await steamApps.PICSGetProductInfo(new SteamApps.PICSRequest(g.Key, ownAt), null, false);
+                KeyValue ownerKv = null;
+                foreach (var res in ownRs.Results)
+                {
+                    if (res.Apps == null) continue;   // ResponsePending 回调不带数据
+                    if (res.Apps.TryGetValue(g.Key, out var info)) { ownerKv = info.KeyValues; break; }
+                }
+                if (ownerKv == null || ownerKv.Children.Count == 0)
+                    throw new InvalidOperationException("拿不到属主应用信息（未拥有或已下架）");
+                foreach (var s in g)
+                {
+                    string gid = ownerKv["depots"][s.depotId.ToString()]["manifests"]["public"]["gid"].AsString();
+                    if (!string.IsNullOrEmpty(gid) && ulong.TryParse(gid, out var mgid))
+                        depots.Add((s.depotId, mgid, s.ownerApp));
+                    else
+                        log?.Invoke($"  depot {s.depotId} 在属主应用里无公开清单，跳过。", LogKind.Warn);
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                log?.Invoke($"⚠ 属主 app {g.Key} 解析失败: {ex.Message}，其共享 depot 跳过。", LogKind.Warn);
+            }
+        }
+
         if (depots.Count == 0)
             throw new InvalidOperationException("该应用没有可提取的内容 depot。");
-        log?.Invoke($"共 {depots.Count} 个 depot 需要提取。", LogKind.Info);
+        log?.Invoke($"共 {depots.Count} 个 depot 需要提取（含 {sharedDepots.Count} 个共享 depot）。", LogKind.Info);
 
         // 4) 目标目录（与拉取产物同构；重新提取时写回原文件夹）
         string dirName = "[" + appid + "]" + name;
@@ -473,7 +514,7 @@ internal sealed class SteamExtractor : IDisposable
         var manifestPaths = new List<string>();
         var failed = new List<uint>();
 
-        foreach (var (depotId, gid) in depots)
+        foreach (var (depotId, gid, ownerApp) in depots)
         {
             ct.ThrowIfCancellationRequested();
             string localPath = Path.Combine(dir, depotId + "_" + gid + ".manifest");
@@ -481,8 +522,8 @@ internal sealed class SteamExtractor : IDisposable
             byte[] depotKey = null;
             try
             {
-                // 密钥每次都要取（Key.vdf 需要）；只有清单文件本身可跳过下载
-                var keyCb = await steamApps.GetDepotDecryptionKey(depotId, (uint)appid);
+                // 密钥每次都要取（Key.vdf 需要）；只有清单文件本身可跳过下载；共享 depot 按属主身份取
+                var keyCb = await steamApps.GetDepotDecryptionKey(depotId, ownerApp);
                 if (keyCb.Result != EResult.OK || keyCb.DepotKey == null)
                     throw new InvalidOperationException($"Steam 返回 {keyCb.Result}（未拥有该 depot 或未发售）");
                 depotKey = keyCb.DepotKey;
@@ -493,7 +534,7 @@ internal sealed class SteamExtractor : IDisposable
                 }
                 else
                 {
-                    ulong code = await steamContent.GetManifestRequestCode(depotId, (uint)appid, gid).ConfigureAwait(false);
+                    ulong code = await steamContent.GetManifestRequestCode(depotId, ownerApp, gid).ConfigureAwait(false);
                     Exception lastEx = null;
                     for (int i = 0; i < Math.Min(3, servers.Count); i++)
                     {
@@ -501,7 +542,7 @@ internal sealed class SteamExtractor : IDisposable
                         var server = servers[i];
                         try
                         {
-                            var auth = await steamContent.GetCDNAuthToken((uint)appid, depotId, server.Host).ConfigureAwait(false);
+                            var auth = await steamContent.GetCDNAuthToken(ownerApp, depotId, server.Host).ConfigureAwait(false);
                             var manifest = await cdnClient.DownloadManifestAsync(depotId, gid, code,
                                 server, depotKey, cdnAuthToken: auth.Token).ConfigureAwait(false);
                             manifest.SaveToFile(localPath);
