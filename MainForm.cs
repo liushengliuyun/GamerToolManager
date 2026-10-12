@@ -229,7 +229,7 @@ public class MainForm : Form
         var lblPull = new Label { Text = "拉取新游戏:", AutoSize = true, ForeColor = Theme.Sub, Margin = new Padding(0, 8, 10, 0) };
         txtPull.Font = new Font("Microsoft YaHei UI", 10.5f);
         txtPull.BackColor = Theme.Input; txtPull.ForeColor = Theme.Text; txtPull.BorderStyle = BorderStyle.FixedSingle;
-        txtPull.Width = 420; // 固定宽度，不随窗口伸缩
+        txtPull.Width = 560; // 加长一些（用户偏好）
         txtPull.Margin = new Padding(0, 0, 10, 0);
         txtPull.PlaceholderText = "AppID / 游戏名 / 粘贴或拖入 Steam 链接";
         btnPullGo = new Button { Text = "开始拉取", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 32), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 0, 0) };
@@ -420,7 +420,6 @@ public class MainForm : Form
         pnlDetails.Controls.Add(lblHint);
         pnlDetails.Controls.Add(lblInfo);
         pnlDetails.Controls.Add(lblBig);
-        // 顺序: Top 的添加顺序决定从上往下堆叠（后加的更靠上?）——需要反转
         pnlDetails.Controls.SetChildIndex(stack, 0);
         pnlDetails.Controls.SetChildIndex(lblHint, 1);
         pnlDetails.Controls.SetChildIndex(lblInfo, 2);
