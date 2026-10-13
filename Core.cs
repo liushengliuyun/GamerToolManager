@@ -169,7 +169,7 @@ public class GameEntry
     public string CustomName;
     public string FetchedName;
     public DateTime? RegTime;   // 注册（部署）时间
-    public bool Owned;          // 已拥有或家庭共享（属于本人/家庭库），来自授权列表 ∪ 本机已安装清单
+    public bool Owned;          // 已拥有或家庭共享（授权列表 ∪ 本机已安装；曾破解部署过的已安装不算）
 
     public bool Deployed => !string.IsNullOrEmpty(DeployedLuaPath);
     /// <summary>文件夹存在但没有生成解锁 Lua —— 无法注册（拉取失败或游戏不在清单仓库）。</summary>

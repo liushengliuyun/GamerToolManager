@@ -1464,7 +1464,12 @@ public class MainForm : Form
             await SteamExtractor.Default.EnsureLoggedOnAsync(CancellationToken.None, null);
             var owned = await SteamExtractor.Default.GetOwnedAppsAsync(CancellationToken.None, null);
             var set = new HashSet<long>(owned.Select(i => (long)i));
-            foreach (var id in Store.GetInstalledAppIds(store.SteamDirEff)) set.Add(id);
+            foreach (var id in Store.GetInstalledAppIds(store.SteamDirEff))
+            {
+                // 曾被本工具部署过的（games.json 有部署痕迹）＝ SteamTools 破解下载的产物，appmanifest 不能当「已拥有」证据
+                bool unlockedBefore = store.Records.TryGetValue(id, out var r) && r.DeployedAt != null;
+                if (!unlockedBefore) set.Add(id);
+            }
             ownedApps = set;
             foreach (var e in entries) e.Owned = ownedApps.Contains(e.AppId);
             Log($"✓ Steam 授权对比完成：已拥有/家庭共享 {set.Count} 个，状态列已标「已拥有」。", LogKind.Ok);
