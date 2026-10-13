@@ -1168,7 +1168,7 @@ internal class CollectorDialog : Form
         store.SaveSettings();
     }
 
-    void ScanDir()
+    async void ScanDir()
     {
         string dir = txtDir.Text.Trim();
         if (dir.Length == 0 || !Directory.Exists(dir))
@@ -1204,6 +1204,26 @@ internal class CollectorDialog : Form
         AppendLog($"扫描完成: 发现 {sets.Count} 个清单集（{ok} 个可上传" + (bad > 0 ? $"，{bad} 个无法识别 AppID" : "") + "）。", Theme.Accent);
         if (sets.Count == 0)
             AppendLog("该目录下没有找到清单集。支持 [AppID] 文件夹 / 散装 *.manifest + Key.vdf / 含 <AppID>.lua 的文件夹。", Theme.Sub);
+
+        // 远端状态对比：仓库已有分支的标「已收录」（只查分支存在；重传也无害，只提交差异）
+        try
+        {
+            var branches = await Collector.GetBranchesAsync(store.ProxyEff);
+            int have = 0;
+            foreach (DataGridViewRow r in grid.Rows)
+            {
+                if (r.Tag is CollectSet s && s.Recognized && branches.Contains(s.AppId))
+                {
+                    SetRowState(r, "已收录 ✓", Theme.Green);
+                    have++;
+                }
+            }
+            AppendLog($"对比收集仓库：{have} 个已收录，{ok - have} 个待上传。", Theme.Sub);
+        }
+        catch (Exception ex)
+        {
+            AppendLog("⚠ 未能获取仓库收录状态（不影响上传，重传只提交差异）: " + ex.Message, Theme.Sub);
+        }
     }
 
     void ToggleAll()
