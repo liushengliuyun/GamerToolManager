@@ -1468,7 +1468,31 @@ public class MainForm : Form
     {
         if (!Store.SteamRunning)
         {
-            Log("Steam 当前未运行，无需重启。", LogKind.Info);
+            // 兜底：Steam 没在跑也要把整套按序拉起来（SteamTools 先就绪再开 Steam），部署完即可直接游玩
+            Log("Steam 当前未运行 —— 兜底启动：先 SteamTools 后 Steam。", LogKind.Info);
+            UseWaitCursor = true;
+            try
+            {
+                if (Store.SteamToolsInstalled)
+                {
+                    if (Store.SteamToolsRunning)
+                        Log("SteamTools 已在运行。", LogKind.Info);
+                    else
+                    {
+                        Log("启动 SteamTools 并等它就绪…", LogKind.Info);
+                        Store.StartSteamTools(Store.SteamToolsExe);
+                        for (int i = 0; i < 20 && !Store.SteamToolsRunning; i++) await Task.Delay(500);
+                        await Task.Delay(3500); // 给注入服务初始化时间
+                    }
+                }
+                else
+                    Log("⚠ 未检测到 SteamTools，仅启动 Steam（解锁依赖 SteamTools 运行）。", LogKind.Warn);
+
+                Log("启动 Steam…", LogKind.Info);
+                Store.StartSteam(store.SteamDirEff);
+                Log("✓ 已启动 Steam。", LogKind.Ok);
+            }
+            finally { UseWaitCursor = false; }
             return;
         }
         if (MessageBox.Show(this, reason + "\n\n是否现在重启 Steam？（将等待 Steam 完全退出后自动重新启动）\n若重启后仍未解锁，请确认 SteamTools 正在运行，再重启一次 Steam。",
