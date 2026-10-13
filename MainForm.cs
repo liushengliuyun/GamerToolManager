@@ -6,6 +6,7 @@ public class MainForm : Form
 {
     private readonly Store store = new();
     private List<GameEntry> entries = new();
+    private HashSet<long> ownedApps;   // 已拥有 ∪ 家庭共享（已安装）：异步加载，完成前状态列维持原显示
     private bool building;
     private bool fetchingNames;
     private bool busyPack; // 导入清单包进行中（防止重复触发）
@@ -48,6 +49,9 @@ public class MainForm : Form
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
         BuildUi();
         RefreshAll();
+
+        // 异步加载「已拥有/家庭共享」集合：有本机凭据才静默续登，不主动打扰登录；完成后状态列刷新
+        _ = LoadOwnedAsync();
 
         // 代理探活/漂移自愈通知写进运行日志
         Store.ProxyNotice += msg => Log(msg,
@@ -534,6 +538,8 @@ public class MainForm : Form
     {
         long sel = Selected()?.AppId ?? -1;
         entries = store.Scan();
+        foreach (var e in entries)
+            e.Owned = ownedApps != null && ownedApps.Contains(e.AppId);
         RebuildGrid();
         if (keepSelection && sel >= 0)
         {
@@ -570,12 +576,12 @@ public class MainForm : Form
             int i = grid.Rows.Add(
                 e.DisplayName,
                 e.AppId.ToString(),
-                e.Deployed ? "● 已部署" : "○ 未注册",
+                e.Owned ? "✓ 已拥有" : e.Deployed ? "● 已部署" : "○ 未注册",
                 e.RegTime.HasValue ? e.RegTime.Value.ToString("MM-dd HH:mm") : "—",
                 e.FolderExists ? (e.Empty ? "空" : "✓") : "—",
                 e.LocalManifests.Count.ToString());
             grid.Rows[i].Tag = e;
-            grid.Rows[i].Cells[2].Style.ForeColor = e.Deployed ? Theme.Green : Theme.Sub;
+            grid.Rows[i].Cells[2].Style.ForeColor = e.Owned ? Theme.Green : (e.Deployed ? Theme.Green : Theme.Sub);
             grid.Rows[i].Cells[3].Style.ForeColor = e.RegTime.HasValue ? Theme.Text : Theme.Sub;
             grid.Rows[i].Cells[4].Style.ForeColor = !e.FolderExists ? Theme.Sub : (e.Empty ? Theme.Red : Theme.Text);
             grid.Rows[i].Cells[4].Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
@@ -626,7 +632,7 @@ public class MainForm : Form
             "AppID:   " + e.AppId + "\n" +
             "本地:     " + (e.FolderExists ? e.Folder : "（清单文件夹不存在）") + "\n" +
             "Lua:      " + (e.SourceLuaExists ? "✓ 已生成" : "— 未生成") + "\n" +
-            "Steam:  " + (e.Deployed ? "● 已注册解锁" : "○ 未注册") + "\n" +
+            "Steam:  " + (e.Owned ? "✓ 已拥有（本人或家庭库）" : e.Deployed ? "● 已注册解锁" : "○ 未注册") + "\n" +
             "清单:     本地 " + e.LocalManifests.Count + " 个 · depotcache 占用 " + dcFiles + " 个\n" +
             "登记库:  appids.db 命中 " + dbIds.Count + " 行";
 
@@ -1443,6 +1449,31 @@ public class MainForm : Form
         {
             UseWaitCursor = false;
             busyPack = false;
+        }
+    }
+
+    /// <summary>
+    /// 后台加载「已拥有 ∪ 家庭共享」集合：有本机凭据才静默续登 Steam（不打扰登录），
+    /// 授权列表 ∪ 本机已安装清单（家庭共享的游戏装了才有），完成后状态列标「已拥有」。
+    /// </summary>
+    private async Task LoadOwnedAsync()
+    {
+        try
+        {
+            if (SteamAuthStore.Load() == null) return;
+            await SteamExtractor.Default.EnsureLoggedOnAsync(CancellationToken.None, null);
+            var owned = await SteamExtractor.Default.GetOwnedAppsAsync(CancellationToken.None, null);
+            var set = new HashSet<long>(owned.Select(i => (long)i));
+            foreach (var id in Store.GetInstalledAppIds(store.SteamDirEff)) set.Add(id);
+            ownedApps = set;
+            foreach (var e in entries) e.Owned = ownedApps.Contains(e.AppId);
+            Log($"✓ Steam 授权对比完成：已拥有/家庭共享 {set.Count} 个，状态列已标「已拥有」。", LogKind.Ok);
+            RebuildGrid();
+            UpdateDetails();
+        }
+        catch (Exception ex)
+        {
+            Log("⚠ Steam 授权对比失败（不影响其他功能）: " + ex.Message, LogKind.Warn);
         }
     }
 

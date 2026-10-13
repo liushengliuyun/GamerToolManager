@@ -169,6 +169,7 @@ public class GameEntry
     public string CustomName;
     public string FetchedName;
     public DateTime? RegTime;   // 注册（部署）时间
+    public bool Owned;          // 已拥有或家庭共享（属于本人/家庭库），来自授权列表 ∪ 本机已安装清单
 
     public bool Deployed => !string.IsNullOrEmpty(DeployedLuaPath);
     /// <summary>文件夹存在但没有生成解锁 Lua —— 无法注册（拉取失败或游戏不在清单仓库）。</summary>
@@ -1111,6 +1112,31 @@ public partial class Store
     }
 
     // ---------- Steam 进程 ----------
+    /// <summary>本机全部 Steam 库中已安装游戏的 AppID 集合（含家庭共享安装的；读 libraryfolders.vdf + appmanifest 文件名，纯本地）。</summary>
+    public static HashSet<long> GetInstalledAppIds(string steamDir)
+    {
+        var set = new HashSet<long>();
+        try
+        {
+            if (string.IsNullOrWhiteSpace(steamDir)) return set;
+            var libs = new List<string> { steamDir };
+            string lf = System.IO.Path.Combine(steamDir, "steamapps", "libraryfolders.vdf");
+            if (File.Exists(lf))
+                foreach (Match m in Regex.Matches(File.ReadAllText(lf), "\"path\"\\s+\"([^\"]+)\""))
+                    libs.Add(m.Groups[1].Value.Replace("\\\\", "\\"));
+            foreach (var lib in libs)
+            {
+                string sa = System.IO.Path.Combine(lib, "steamapps");
+                if (!Directory.Exists(sa)) continue;
+                foreach (var f in Directory.GetFiles(sa, "appmanifest_*.acf"))
+                    if (long.TryParse(Path.GetFileNameWithoutExtension(f).Substring("appmanifest_".Length), out var id))
+                        set.Add(id);
+            }
+        }
+        catch { }
+        return set;
+    }
+
     public static bool SteamRunning => Process.GetProcessesByName("steam").Any();
 
     public static async Task<bool> ShutdownSteamAsync(string steamDir)
