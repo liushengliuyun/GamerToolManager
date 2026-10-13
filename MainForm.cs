@@ -329,6 +329,23 @@ public class MainForm : Form
             }
         };
         grid.SelectionChanged += (_, _) => { if (!building) UpdateDetails(); };
+
+        // 「已拥有+已部署」并存时同格双色自绘（单格原生只支持一色）
+        grid.CellPainting += (_, e) =>
+        {
+            if (e.ColumnIndex != grid.Columns["cState"].Index || e.RowIndex < 0) return;
+            if (grid.Rows[e.RowIndex].Tag is not GameEntry en || !(en.Owned && en.Deployed)) return;
+            e.Paint(e.ClipBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border
+                                  | DataGridViewPaintParts.Focus | DataGridViewPaintParts.ContentBackground);
+            int x = e.CellBounds.Left + 4;
+            int y = e.CellBounds.Top + (e.CellBounds.Height - Font.Height) / 2;
+            foreach (var (s, c) in new[] { ("✓ 已拥有 ", Theme.Accent), ("● 已部署", Theme.Green) })
+            {
+                TextRenderer.DrawText(e.Graphics, s, Font, new Point(x, y), c);
+                x += TextRenderer.MeasureText(e.Graphics, s, Font).Width;
+            }
+            e.Handled = true;
+        };
         grid.CellMouseDoubleClick += (s, e) =>
         {
             if (e.RowIndex < 0) return;
@@ -576,13 +593,12 @@ public class MainForm : Form
             int i = grid.Rows.Add(
                 e.DisplayName,
                 e.AppId.ToString(),
-                e.Owned ? "✓ 已拥有" : e.Deployed ? "● 已部署" : "○ 未注册",
+                e.Owned && e.Deployed ? "✓ 已拥有 ● 已部署" : e.Owned ? "✓ 已拥有" : e.Deployed ? "● 已部署" : "○ 未注册",
                 e.RegTime.HasValue ? e.RegTime.Value.ToString("MM-dd HH:mm") : "—",
                 e.FolderExists ? (e.Empty ? "空" : "✓") : "—",
                 e.LocalManifests.Count.ToString());
             grid.Rows[i].Tag = e;
-            grid.Rows[i].Cells[2].Style.ForeColor = e.Owned ? Theme.Accent : (e.Deployed ? Theme.Green : Theme.Sub);
-            grid.Rows[i].Cells[3].Style.ForeColor = e.RegTime.HasValue ? Theme.Text : Theme.Sub;
+            grid.Rows[i].Cells[2].Style.ForeColor = e.Owned ? Theme.Accent : (e.Deployed ? Theme.Green : Theme.Sub);            grid.Rows[i].Cells[3].Style.ForeColor = e.RegTime.HasValue ? Theme.Text : Theme.Sub;
             grid.Rows[i].Cells[4].Style.ForeColor = !e.FolderExists ? Theme.Sub : (e.Empty ? Theme.Red : Theme.Text);
             grid.Rows[i].Cells[4].Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
             grid.Rows[i].Cells[5].Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
