@@ -81,6 +81,10 @@ public class MainForm : Form
 
             if (store.S.AutoFetchNames)
                 _ = FetchMissingNamesAsync(silent: true);
+
+            // 启动静默检查更新(设置可关);发现新版才打扰,失败不提示
+            if (store.S.AutoCheckUpdate)
+                _ = CheckUpdateAsync(silent: true);
             // 首次运行引导：未装 SteamTools 且自带了安装包 → 主动提示
             if (!Store.SteamToolsInstalled && Store.BundledSteamToolsSetup() != null)
             {
@@ -190,6 +194,11 @@ public class MainForm : Form
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(i1);
             menu.Items.Add(i2);
+            menu.Items.Add(new ToolStripSeparator());
+            var i4 = new ToolStripMenuItem("检查更新 —— 检查 GitHub 最新版本,新版本一键下载安装(镜像接力,免 VPN)")
+            { ForeColor = Theme.Text, BackColor = Theme.Panel };
+            i4.Click += async (s3, e3) => await CheckUpdateAsync(silent: false);
+            menu.Items.Add(i4);
             menu.Items.Add(new ToolStripSeparator());
             var i3 = new ToolStripMenuItem("导入清单文件… —— 把别人分享的 .gtm 清单包导入（也可直接拖进主窗口）")
             { ForeColor = Theme.Text, BackColor = Theme.Panel };
@@ -1594,6 +1603,62 @@ public class MainForm : Form
         finally
         {
             UseWaitCursor = false;
+        }
+    }
+
+    // ================= 自动更新 =================
+    /// <summary>检查 GitHub 最新 Release:silent=启动静默检查(仅发现新版才提示);非 silent=菜单手动检查。</summary>
+    async Task CheckUpdateAsync(bool silent)
+    {
+        Updater.ReleaseInfo rel;
+        try
+        {
+            UseWaitCursor = silent ? false : true;
+            rel = await Updater.CheckAsync(store.ProxyEff, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            if (!silent) MessageBox.Show(this, "检查更新失败:" + ex.Message, "检查更新",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            else Log("⚠ 检查更新失败(不影响使用):" + ex.Message, LogKind.Warn);
+            return;
+        }
+        finally { UseWaitCursor = false; }
+
+        if (!rel.IsNewer)
+        {
+            if (!silent)
+                MessageBox.Show(this, $"已是最新版本 v{Updater.Current.ToString(3)} ✓", "检查更新",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        // 用户跳过过该版本 → 只写日志不再弹窗
+        if (store.S.SkippedUpdateTag == rel.Tag)
+        {
+            Log($"ℹ 有新版本 v{rel.Version}(你曾选择跳过)。【更多 ▾ → 检查更新】可随时升级。", LogKind.Info);
+            return;
+        }
+
+        Log($"🎉 发现新版本 v{rel.Version}(当前 v{Updater.Current.ToString(3)}),【更多 ▾ → 检查更新】可升级。", LogKind.Ok);
+
+        if (!silent)
+        {
+            UpdateDialog.ShowUpdate(this, store, rel);
+            return;
+        }
+
+        var r = MessageBox.Show(this,
+            $"发现新版本 v{rel.Version}(当前 v{Updater.Current.ToString(3)})\n\n" +
+            Updater.NotesExcerpt(rel.Notes, 4) + "\n\n" +
+            $"【是】立即更新   【否】下次再说   【取消】跳过 v{rel.Version}(不再提醒)",
+            "发现新版本", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question, MessageBoxDefaultButton.Button1);
+        if (r == DialogResult.Yes)
+            UpdateDialog.ShowUpdate(this, store, rel);
+        else if (r == DialogResult.Cancel)
+        {
+            store.S.SkippedUpdateTag = rel.Tag;
+            store.SaveSettings();
         }
     }
 }

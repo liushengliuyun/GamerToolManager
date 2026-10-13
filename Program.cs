@@ -65,6 +65,34 @@ internal static class Program
             return ok == sets.Count ? 0 : 1;
         }
 
+
+        // 自动更新实测:--updtest [dl] —— 检查 GitHub 最新 Release 并与当前版本比较;
+        // 带 dl 参数时把安装包下载到临时目录(镜像接力+校验),stdout 输出全程。
+        if (args.Length > 0 && args[0].Equals("--updtest", StringComparison.OrdinalIgnoreCase))
+        {
+            var store = new Store();
+            store.Load();
+            Console.WriteLine("当前版本: v" + Updater.Current.ToString(3));
+            var rel = Updater.CheckAsync(store.ProxyEff, CancellationToken.None).GetAwaiter().GetResult();
+            Console.WriteLine($"最新版本: v{rel.Version}  {rel.Name}  {rel.PublishedAt}");
+            Console.WriteLine($"安装包: {rel.AssetName} ({rel.AssetSize} 字节)");
+            Console.WriteLine(rel.IsNewer ? "结论: 有新版本" : "结论: 已是最新");
+            if (args.Any(a => a.Equals("dl", StringComparison.OrdinalIgnoreCase)))
+            {
+                Console.WriteLine("== 下载测试(镜像接力 → 临时目录) ==");
+                long lastPct = 0;
+                string path = Updater.DownloadAsync(rel, store.ProxyEff,
+                    s => Console.WriteLine("  " + s),
+                    (d, t) =>
+                    {
+                        long p = t > 0 ? d * 100 / t : 0;
+                        if (p / 25 > lastPct / 25) { Console.WriteLine($"  {p}%"); lastPct = p; }
+                    },
+                    CancellationToken.None).GetAwaiter().GetResult();
+                Console.WriteLine("已下载并校验: " + path + " (" + new FileInfo(path).Length + " 字节)");
+            }
+            return 0;
+        }
         // 文档截图模式：--shot <outdir>，依次打开主窗 / 清单收集 / 导入预览并各截一张 PNG（README 与 Release 用）
         if (args.Length > 1 && args[0].Equals("--shot", StringComparison.OrdinalIgnoreCase))
         {
@@ -290,6 +318,15 @@ internal static class SelfTest
             string s = Native.decode_gbk(gbk);
             string codes = string.Join(",", s.Select(c => ((int)c).ToString("X4")));
             check("GBK 解码: " + s + "  (U+" + codes + ")", s == "请输入");
+
+            // 版本比较(自动更新)
+            bool cmp = Updater.CompareVersions("v1.6.0", "1.5.2") > 0
+                    && Updater.CompareVersions("1.5.2", "V1.6.0") < 0
+                    && Updater.CompareVersions("v1.5.2", "1.5.2") == 0
+                    && Updater.CompareVersions("1.5.10", "1.5.9") > 0
+                    && Updater.CompareVersions("1.5", "1.5.0") == 0
+                    && Updater.CompareVersions("beta", "1.0.0") < 0;
+            check("版本比较(自动更新): v 前缀/数值进位/不可解析回退", cmp);
 
             // 清单收集引擎自检（不依赖网络）
             byte[] blob = System.Text.Encoding.UTF8.GetBytes("hello gamer tool\n");

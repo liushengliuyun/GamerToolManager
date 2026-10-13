@@ -299,6 +299,7 @@ internal class SettingsDialog : Form
     private readonly CheckBox chkDepot = new() { Text = "还原时同时清理 depotcache 清单文件", Checked = true };
     private readonly CheckBox chkDb = new() { Text = "还原时同时清理 SteamTools 登记 (appids.db)", Checked = true };
     private readonly CheckBox chkAutoFetch = new() { Text = "启动时后台联网抓取缺失游戏名", Checked = true };
+    private readonly CheckBox chkAutoUpdate = new() { Text = "启动时自动检查新版本(只查 GitHub API,不自动下载)", Checked = true };
     private readonly Label lblPreview = new();
 
     public SettingsDialog(Store store)
@@ -368,7 +369,7 @@ internal class SettingsDialog : Form
         // 行为组（内部流式，随字体自适应）
         var grp = new GroupBox { Text = "行为", AutoSize = true, Dock = DockStyle.Fill, ForeColor = Theme.Sub, Margin = new Padding(0, 12, 0, 0) };
         var grpFlow = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(4, 0, 4, 0) };
-        foreach (var chk in new[] { chkDepot, chkDb, chkAutoFetch })
+        foreach (var chk in new[] { chkDepot, chkDb, chkAutoFetch, chkAutoUpdate })
         {
             chk.AutoSize = true;
             chk.Margin = new Padding(0, 3, 0, 3);
@@ -394,6 +395,7 @@ internal class SettingsDialog : Form
         chkDepot.Checked = store.S.CleanDepotCache;
         chkDb.Checked = store.S.CleanAppIdsDb;
         chkAutoFetch.Checked = store.S.AutoFetchNames;
+        chkAutoUpdate.Checked = store.S.AutoCheckUpdate;
 
         void UpdatePreview()
         {
@@ -414,6 +416,7 @@ internal class SettingsDialog : Form
             store.S.CleanDepotCache = chkDepot.Checked;
             store.S.CleanAppIdsDb = chkDb.Checked;
             store.S.AutoFetchNames = chkAutoFetch.Checked;
+            store.S.AutoCheckUpdate = chkAutoUpdate.Checked;
             store.SaveSettings();
             DialogResult = DialogResult.OK;
             Close();

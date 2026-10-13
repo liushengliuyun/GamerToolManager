@@ -39,6 +39,8 @@ public class Settings
     public bool CleanAppIdsDb { get; set; } = true;     // 还原时同时清理 SteamTools appids.db 登记
     public bool PassProxyToTool { get; set; } = false;  // (保留兼容)
     public bool AutoFetchNames { get; set; } = true;    // 启动时后台抓取缺失游戏名
+    public bool AutoCheckUpdate { get; set; } = true;   // 启动时自动检查 GitHub 新版本
+    public string SkippedUpdateTag { get; set; } = "";  // 用户选择跳过的更新版本 tag(不再提醒)
     public string CollectDir { get; set; } = "";        // 清单收集目录；留空 = GamerToolDir
     public int CollectWinW { get; set; } = 0;           // 清单收集窗口宽高记忆（0 = 默认）
     public int CollectWinH { get; set; } = 0;

@@ -37,4 +37,6 @@ Name: "{autoprograms}\GamerTool 管理器"; Filename: "{app}\GamerToolManager.ex
 Name: "{autodesktop}\GamerTool 管理器"; Filename: "{app}\GamerToolManager.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\GamerToolManager.exe"; Description: "立即运行 GamerTool 管理器(&L)"; Flags: nowait postinstall skipifsilent
+; runasoriginaluser:静默升级(自动更新)也执行本条 —— 装完以原用户身份自动重启新版本;
+; 手动安装时为「立即运行」勾选项,不再以管理员身份启动程序
+Filename: "{app}\GamerToolManager.exe"; Description: "立即运行 GamerTool 管理器(&L)"; Flags: nowait postinstall runasoriginaluser
