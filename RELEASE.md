@@ -99,5 +99,5 @@ publish-sc\GamerToolManager.exe --shot docs
 - [ ] csproj `<Version>` 已升号
 - [ ] `--selftest` 通过（除已知环境 FAIL）
 - [ ] notes 按本模板包含三个固定章节
-- [ ] 附件：Setup 必带；示例清单包有更新时一并挂
+- [ ] 附件：Setup 必带；**示例清单包 .gtm 必带**（无新版时复用上一版的，绝不能让 Release 页缺包）
 - [ ] push 已同步 master 与 dev
