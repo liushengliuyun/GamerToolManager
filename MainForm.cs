@@ -581,7 +581,7 @@ public class MainForm : Form
                 e.FolderExists ? (e.Empty ? "空" : "✓") : "—",
                 e.LocalManifests.Count.ToString());
             grid.Rows[i].Tag = e;
-            grid.Rows[i].Cells[2].Style.ForeColor = e.Owned ? Theme.Green : (e.Deployed ? Theme.Green : Theme.Sub);
+            grid.Rows[i].Cells[2].Style.ForeColor = e.Owned ? Theme.Accent : (e.Deployed ? Theme.Green : Theme.Sub);
             grid.Rows[i].Cells[3].Style.ForeColor = e.RegTime.HasValue ? Theme.Text : Theme.Sub;
             grid.Rows[i].Cells[4].Style.ForeColor = !e.FolderExists ? Theme.Sub : (e.Empty ? Theme.Red : Theme.Text);
             grid.Rows[i].Cells[4].Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
