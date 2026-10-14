@@ -322,6 +322,7 @@ internal class UpdateDialog : Form
     readonly RichTextBox rtb = new()
     {
         ReadOnly = true,
+        Dock = DockStyle.Fill,   // 缺此设置会以默认小尺寸叠在最上层，盖住顶部信息并留白
         BackColor = Theme.Back,
         ForeColor = Theme.Text,
         BorderStyle = BorderStyle.None,
