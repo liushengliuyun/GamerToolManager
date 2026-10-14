@@ -1117,37 +1117,52 @@ public class MainForm : Form
 
     private void DeleteSourceLua()
     {
-        var e = Selected();
-        if (e == null || !e.SourceLuaExists) return;
-        string lua = Path.Combine(e.Folder, e.AppId + ".lua");
-        if (MessageBox.Show(this, "删除清单文件夹中的解锁 Lua？（移入回收站）\n" + lua,
+        var targets = SelectedMany().Where(e => e.SourceLuaExists).ToList();
+        if (targets.Count == 0) return;
+        string preview = string.Join("\n", targets.Take(12).Select(e => "• " + Path.Combine(e.Folder, e.AppId + ".lua")));
+        if (targets.Count > 12) preview += $"\n… 等共 {targets.Count} 个";
+        if (MessageBox.Show(this, $"将 {targets.Count} 个解锁 Lua 移入回收站（可恢复）：\n" + preview,
                 "删除 Lua", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             return;
-        if (Native.RecycleDelete(lua))
+        int ok = 0, fail = 0;
+        foreach (var e in targets)
         {
-            Log("✓ 已删除 " + lua + "（回收站）", LogKind.Ok);
-            if (e.Deployed)
-                Log("  提示: Steam 中仍有已部署副本，可用【还原未破解】移除。", LogKind.Warn);
-            RefreshAll();
+            string lua = Path.Combine(e.Folder, e.AppId + ".lua");
+            if (Native.RecycleDelete(lua))
+            {
+                ok++;
+                Log("✓ 已删除 " + lua + "（回收站）", LogKind.Ok);
+                if (e.Deployed)
+                    Log("  提示: Steam 中仍有已部署副本，可用【还原未破解】移除。", LogKind.Warn);
+            }
+            else fail++;
         }
-        else
-            Log("✕ 删除失败: " + lua, LogKind.Err);
+        if (fail > 0) Log($"✕ {fail} 个删除失败（可能被占用）", LogKind.Err);
+        if (ok > 0) { Log($"== 批量删除完成: 成功 {ok}，失败 {fail}。", LogKind.Info); RefreshAll(); }
     }
 
     private void DeleteGameFolder()
     {
-        var e = Selected();
-        if (e == null || !e.FolderExists) return;
-        if (MessageBox.Show(this, "将整个清单文件夹移入回收站（可恢复）：\n" + e.Folder,
+        var targets = SelectedMany().Where(e => e.FolderExists).ToList();
+        if (targets.Count == 0) return;
+        string preview = string.Join("\n", targets.Take(12).Select(e => "• " + e.Folder));
+        if (targets.Count > 12) preview += $"\n… 等共 {targets.Count} 个";
+        if (MessageBox.Show(this, $"将 {targets.Count} 个清单文件夹移入回收站（可恢复）：\n" + preview,
                 "删除清单文件夹", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             return;
-        if (Native.RecycleDelete(e.Folder))
+        int ok = 0, fail = 0;
+        foreach (var e in targets)
         {
-            Log("✓ 已删除 " + e.Folder + "（回收站）", LogKind.Ok);
-            RefreshAll();
+            if (Native.RecycleDelete(e.Folder))
+            {
+                ok++;
+                Log("✓ 已删除 " + e.Folder + "（回收站）", LogKind.Ok);
+            }
+            else fail++;
         }
-        else
-            Log("✕ 删除失败: " + e.Folder, LogKind.Err);
+        if (fail > 0) Log($"✕ {fail} 个删除失败（可能被占用）", LogKind.Err);
+        if (ok > 0) Log($"== 批量删除完成: 成功 {ok}，失败 {fail}。", LogKind.Info);
+        if (ok > 0) RefreshAll();
     }
 
     private void RenameSelected()
