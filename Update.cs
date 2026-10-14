@@ -330,7 +330,7 @@ internal class UpdateDialog : Form
         WordWrap = true,
         Font = new Font("Microsoft YaHei UI", 9f),
     };
-    readonly Button btnAction = new() { Text = "立即下载并安装", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 30), Padding = new Padding(10, 0, 10, 0) };
+    readonly Button btnAction = new() { Text = "立即下载并安装", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 30), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 8, 0) };
     readonly Button btnPage = new() { Text = "打开发布页", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 30), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 8, 0) };
     readonly Button btnClose = new() { Text = "关闭", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, 30), Padding = new Padding(10, 0, 10, 0), Margin = new Padding(0, 0, 8, 0) };
 
@@ -346,6 +346,19 @@ internal class UpdateDialog : Form
         ForeColor = Theme.Text;
         Font = new Font("Microsoft YaHei UI", 9.5f);
         FormClosing += (_, _) => cts?.Cancel();
+
+        // 按钮统一走全应用扁平样式（否则是系统灰按钮且高度不一）
+        void StyleBtn(Button b, bool primary = false)
+        {
+            b.AutoSize = true;
+            b.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            b.MinimumSize = new Size(0, 32);
+            b.Padding = new Padding(10, 0, 10, 0);
+            UiHelper.Style(b, primary);
+        }
+        StyleBtn(btnAction, true);
+        StyleBtn(btnPage);
+        StyleBtn(btnClose);
 
         // ---------- 顶部信息(FlowLayoutPanel 自适应,DPI 安全) ----------
         var top = new FlowLayoutPanel
@@ -389,7 +402,7 @@ internal class UpdateDialog : Form
             WrapContents = false,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Padding = new Padding(0, 13, 12, 7),
+            Padding = new Padding(0, 16, 12, 16),
         };
         flowR.Controls.Add(btnClose);   // RightToLeft:先加在最右
         flowR.Controls.Add(btnPage);
