@@ -1084,15 +1084,56 @@ public partial class Store
     }
 
     // ---------- SteamTools 检测 / 内置安装包 ----------
+    static string[] _stProbeCache;
+
     public static string SteamToolsExe
     {
         get
         {
-            string pf = @"C:\Program Files\SteamTools\Steamtools.exe";
-            if (File.Exists(pf)) return pf;
-            string lad = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                                      "Programs", "SteamTools", "Steamtools.exe");
-            if (File.Exists(lad)) return lad;
+            // 已探明有效路径直接复用（属性会被 UI 反复查，注册表扫描别每次跑）
+            if (_stProbeCache != null) return _stProbeCache[0];
+
+            // 1) 常见固定位置（默认安装 + 32 位安装器的 Program Files (x86) + 每用户安装）
+            string[] roots =
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs"),
+            };
+            foreach (var r in roots)
+            {
+                string p = Path.Combine(r, "SteamTools", "Steamtools.exe");
+                if (File.Exists(p)) { _stProbeCache = new[] { p }; return p; }
+            }
+
+            // 2) 注册表卸载信息反查（自定义目录 / 其他盘的安装器安装都留有 InstallLocation/DisplayIcon）
+            foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
+            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            {
+                try
+                {
+                    using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+                    using var un = baseKey.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
+                    if (un == null) continue;
+                    foreach (var sub in un.GetSubKeyNames())
+                    {
+                        using var k = un.OpenSubKey(sub);
+                        string name = (k?.GetValue("DisplayName") as string) ?? "";
+                        if (name.IndexOf("steamtools", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                        foreach (var cand in new[] { (k.GetValue("InstallLocation") as string),
+                                                     (k.GetValue("DisplayIcon") as string) })
+                        {
+                            if (string.IsNullOrWhiteSpace(cand)) continue;
+                            string dir = cand.Contains(".exe", StringComparison.OrdinalIgnoreCase)
+                                ? System.IO.Path.GetDirectoryName(cand.Split(',')[0].Trim('"')) : cand.Trim('"');
+                            if (string.IsNullOrWhiteSpace(dir)) continue;
+                            string p = System.IO.Path.Combine(dir, "Steamtools.exe");
+                            if (File.Exists(p)) { _stProbeCache = new[] { p }; return p; }
+                        }
+                    }
+                }
+                catch { }
+            }
             return "";
         }
     }
