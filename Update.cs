@@ -2,6 +2,7 @@ namespace GamerToolManager;
 
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -190,6 +191,22 @@ internal static class Updater
         bool hasProxy = !string.IsNullOrWhiteSpace(proxy);
         Exception last = null;
 
+        // 分段并发优先：单连接到 GitHub 资产 CDN 常被限速，6 线程 Range 分块通常有数倍提升；
+        // 任一段失败 → 删除半成品回退到下面的多源接力
+        if (rel.AssetSize > 1_000_000)
+        {
+            status?.Invoke($"正在下载(6 线程分段)…({Math.Round(rel.AssetSize / 1048576.0)} MB)");
+            try
+            {
+                await SegmentedDownloadAsync(rel, dest, progress, ct);
+                var fi = new FileInfo(dest);
+                if (fi.Length == rel.AssetSize && IsPe(dest)) return dest;
+                status?.Invoke("⚠ 分段下载校验未过，改用多源接力…");
+            }
+            catch (OperationCanceledException) { TryDelete(dest); throw; }
+            catch (Exception ex) { status?.Invoke("⚠ 分段下载不可用(" + ex.Message + ")，改用多源接力…"); }
+        }
+
         var attempts = new List<(string label, HttpClient cli, string url, bool octet)>
         {
             ("API 资产流", httpDlAuth, apiAsset, true),
@@ -255,6 +272,78 @@ internal static class Updater
             return dest;
         }
         throw new InvalidOperationException("所有下载源均失败,请检查网络或稍后再试。", last);
+    }
+
+    /// <summary>
+    /// 6 线程 Range 分段下载:预分配目标文件,每段独立流式写入自己的区间(互不重叠,FileShare.Write 安全);
+    /// 进度按聚合字节数回调(每 200ms 汇报一次,避免跨线程改 UI)。任一段两次尝试都失败即抛出,由调用方回退。
+    /// </summary>
+    static async Task SegmentedDownloadAsync(ReleaseInfo rel, string dest, Action<long, long> progress, CancellationToken ct)
+    {
+        string url = $"https://api.github.com/repos/{Repo}/releases/assets/{rel.AssetId}";
+
+        // Range 支持探测:期望 206 Partial Content
+        using (var probe = new HttpRequestMessage(HttpMethod.Get, url))
+        {
+            probe.Headers.Accept.ParseAdd("application/octet-stream");
+            probe.Headers.Range = new RangeHeaderValue(0, 0);
+            using var resp = await httpDlAuth.SendAsync(probe, HttpCompletionOption.ResponseHeadersRead, ct);
+            if ((int)resp.StatusCode != 206) throw new IOException("源不支持分段(非 206)");
+        }
+
+        using (var fs = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+            fs.SetLength(rel.AssetSize);                       // 预分配,段任务各自定位写自己的区间
+
+        const int Segs = 6;
+        long segSize = rel.AssetSize / Segs;
+        var segDone = new long[Segs];
+        var segs = Enumerable.Range(0, Segs).Select(i => Task.Run(async () =>
+        {
+            long start = i * segSize;
+            long to = (i == Segs - 1) ? rel.AssetSize - 1 : (i + 1) * segSize - 1;
+            for (int attempt = 0; ; attempt++)
+            {
+                long pos = start;
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                    req.Headers.Accept.ParseAdd("application/octet-stream");
+                    req.Headers.Range = new RangeHeaderValue(pos, to);
+                    using var resp = await httpDlAuth.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                    resp.EnsureSuccessStatusCode();
+                    if ((int)resp.StatusCode != 206) throw new IOException("非 206 响应");
+                    await using var net = await resp.Content.ReadAsStreamAsync(ct);
+                    await using var file = new FileStream(dest, FileMode.Open, FileAccess.Write, FileShare.Write, 81920, useAsync: true);
+                    file.Seek(pos, SeekOrigin.Begin);
+                    var buf = new byte[81920];
+                    int read;
+                    while ((read = await net.ReadAsync(buf, ct)) > 0)
+                    {
+                        await file.WriteAsync(buf.AsMemory(0, read), ct);
+                        pos += read;
+                        segDone[i] = pos - start;
+                    }
+                    if (pos != to + 1) throw new IOException("段不完整");
+                    return;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception) when (attempt < 1)
+                {
+                    segDone[i] = 0;   // 整段重试,进度回退本段
+                }
+            }
+        })).ToArray();
+
+        // 进度泵:每 200ms 汇报各段聚合值
+        var all = Task.WhenAll(segs);
+        while (true)
+        {
+            var fin = await Task.WhenAny(all, Task.Delay(200, ct));
+            if (fin == all) break;
+            progress?.Invoke(segDone.Sum(), rel.AssetSize);
+        }
+        await all;
     }
 
     static void TryDelete(string path)
