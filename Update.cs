@@ -317,8 +317,8 @@ internal class UpdateDialog : Form
 
     readonly Label lblVer = new() { AutoSize = true, ForeColor = Theme.Text };
     readonly Label lblTitle = new() { AutoSize = true, ForeColor = Theme.Sub };
-    readonly Label lblStatus = new() { AutoSize = true, ForeColor = Theme.Sub };
-    readonly ProgressBar bar = new() { Width = 300, Height = 16, Visible = false };
+    readonly Label lblStatus = new() { AutoSize = true, ForeColor = Theme.Sub, MaximumSize = new Size(300, 0) };
+    readonly ProgressBar bar = new() { Width = 260, Height = 16, Visible = false };
     readonly RichTextBox rtb = new()
     {
         ReadOnly = true,
@@ -370,7 +370,7 @@ internal class UpdateDialog : Form
         rtb.Text = BuildNotes(rel.Notes);
 
         // ---------- 底部:状态/进度 + 按钮 ----------
-        var bottom = new Panel { Dock = DockStyle.Bottom, Height = 58, BackColor = Theme.Panel };
+        var bottom = new Panel { Dock = DockStyle.Bottom, Height = 64, BackColor = Theme.Panel };
         var flowL = new FlowLayoutPanel
         {
             Dock = DockStyle.Left,
@@ -434,8 +434,8 @@ internal class UpdateDialog : Form
                 },
                 cts.Token);
             downloading = false;
-            btnAction.Text = "立即安装(将重启程序)";
-            lblStatus.Text = "✓ 下载完成并校验通过:" + Path.GetFileName(setupPath);
+            btnAction.Text = "立即安装";
+            lblStatus.Text = "✓ 安装包已下载并校验通过，安装时程序将自动重启";
             bar.Value = 100;
         }
         catch (OperationCanceledException)
